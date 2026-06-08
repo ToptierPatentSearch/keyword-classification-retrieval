@@ -1,0 +1,78 @@
+:root {
+  color: #1f2937;
+  background: #eef3f8;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+* { box-sizing: border-box; }
+
+body { margin: 0; min-width: 320px; min-height: 100vh; }
+
+button, input, textarea { font: inherit; }
+
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: 0.65; }
+
+.shell { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 40px 0; }
+.auth-shell { min-height: 100vh; display: grid; place-items: center; }
+
+.hero { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 28px; }
+
+h1, h2 { margin: 0; color: #0f172a; line-height: 1.1; }
+h1 { font-size: clamp(2rem, 4vw, 3.6rem); max-width: 860px; }
+h2 { font-size: 1.35rem; }
+
+.muted { color: #64748b; line-height: 1.6; }
+.eyebrow { margin: 0 0 10px; color: #1d4ed8; font-size: 0.78rem; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }
+
+.card, .status-card { background: rgba(255, 255, 255, 0.94); border: 1px solid #dbe5f0; border-radius: 22px; box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08); }
+.card { padding: 24px; }
+.status-card { padding: 18px 20px; color: #475569; }
+.auth-card { width: min(460px, 100%); }
+
+.auth-form { display: grid; gap: 16px; margin-top: 24px; }
+label { display: grid; gap: 8px; color: #334155; font-weight: 700; }
+input, textarea { width: 100%; border: 1px solid #cbd5e1; border-radius: 14px; color: #0f172a; background: #fff; outline: none; transition: border 0.2s, box-shadow 0.2s; }
+input { padding: 12px 14px; }
+textarea { min-height: 280px; padding: 16px; line-height: 1.55; resize: vertical; white-space: pre-wrap; }
+input:focus, textarea:focus { border-color: #2563eb; box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12); }
+
+.primary, .secondary, .link-button { border: 0; border-radius: 999px; font-weight: 800; }
+.primary { padding: 12px 20px; background: #1d4ed8; color: white; box-shadow: 0 10px 22px rgba(29, 78, 216, 0.25); }
+.primary:hover:not(:disabled) { background: #1e40af; }
+.secondary { padding: 11px 18px; background: #e2e8f0; color: #0f172a; }
+.secondary:hover:not(:disabled) { background: #cbd5e1; }
+.link-button { margin-top: 16px; padding: 0; color: #1d4ed8; background: transparent; }
+
+.user-panel { display: flex; align-items: center; gap: 12px; padding: 12px; background: rgba(255, 255, 255, 0.7); border: 1px solid #dbe5f0; border-radius: 999px; color: #475569; }
+
+.input-card, .results-card { margin-top: 22px; }
+.section-heading { display: flex; justify-content: space-between; align-items: center; gap: 18px; margin-bottom: 16px; }
+.section-heading span { color: #64748b; font-size: 0.92rem; }
+.actions { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 16px; }
+
+.error, .warning, .success { border-radius: 14px; padding: 12px 14px; line-height: 1.5; }
+.error { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+.warning { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
+.success { background: #ecfdf5; color: #047857; border: 1px solid #a7f3d0; }
+
+.table-wrap { overflow-x: auto; border: 1px solid #e2e8f0; border-radius: 16px; }
+table { width: 100%; border-collapse: collapse; min-width: 1080px; }
+th, td { padding: 12px; border-bottom: 1px solid #e2e8f0; text-align: left; vertical-align: top; font-size: 0.9rem; }
+th { background: #f8fafc; color: #334155; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; }
+tr:last-child td { border-bottom: 0; }
+
+.badge { display: inline-flex; padding: 5px 9px; border-radius: 999px; font-size: 0.78rem; font-weight: 800; text-transform: capitalize; }
+.badge.high { background: #dcfce7; color: #166534; }
+.badge.medium { background: #fef9c3; color: #854d0e; }
+.badge.low { background: #fee2e2; color: #991b1b; }
+
+@media (max-width: 760px) {
+  .shell { width: min(100% - 20px, 1180px); padding: 20px 0; }
+  .hero, .section-heading { flex-direction: column; align-items: stretch; }
+  .user-panel { border-radius: 18px; justify-content: space-between; }
+  .card { padding: 18px; }
+}

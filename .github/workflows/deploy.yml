@@ -32,10 +32,10 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Upload Pages artifact
+      - name: Upload Vite dist
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./dist
+          path: app/dist
 
   deploy:
     environment:

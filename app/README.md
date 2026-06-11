@@ -1,6 +1,6 @@
 # React + Vite + Supabase Auth App
 
-This is the frontend for the Supabase Auth + protected Edge Function example. It is intentionally minimal and uses `@supabase/supabase-js` v2.
+This is the frontend for the Supabase Auth + protected Edge Functions example. It uses `@supabase/supabase-js` v2.
 
 ## Install
 
@@ -21,7 +21,7 @@ VITE_SUPABASE_URL=https://your-project-ref.supabase.co
 VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
 ```
 
-Do not add service role keys to this app. Any `VITE_*` value is bundled for the browser.
+Do not add service role keys or OpenAI keys to this app. Any `VITE_*` value is bundled for the browser.
 
 ## Run
 
@@ -29,7 +29,10 @@ Do not add service role keys to this app. Any `VITE_*` value is bundled for the 
 npm run dev
 ```
 
-After signing in, the dashboard calls the `protected-api` Edge Function with `supabase.functions.invoke()` and sends the current user's JWT in the `Authorization` header.
+After signing in, the dashboard can:
+
+- Call the `analyze` Edge Function from the **Analyze** button using `supabase.functions.invoke()` and the current user's JWT.
+- Call the `protected-api` Edge Function using `supabase.functions.invoke()` and the current user's JWT.
 
 ## Build
 

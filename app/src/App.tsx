@@ -1,150 +1,198 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
-import { analyzeEndpoint, supabase } from './supabaseClient';
-import { downloadAnalysisPdf } from './pdf';
-import type { AnalysisResult } from './types';
+import { supabase } from './lib/supabaseClient';
 
-const sampleText = `A semiconductor device includes an AI-based defect detection unit. The artificial intelligence model analyzes wafer inspection images and classifies process abnormalities.\n半導体装置は、ウェハ検査画像を解析する人工知能モデルを含む。`;
+interface ProtectedApiResponse {
+  message: string;
+  userId: string;
+  email: string | null;
+}
 
-function asErrorMessage(error: unknown): string {
+function getErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'An unexpected error occurred.';
 }
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
+  const [initializing, setInitializing] = useState(true);
+  const [authLoading, setAuthLoading] = useState(false);
+  const [functionLoading, setFunctionLoading] = useState(false);
+  const [authMode, setAuthMode] = useState<'sign-in' | 'sign-up'>('sign-in');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [authMode, setAuthMode] = useState<'sign-in' | 'sign-up'>('sign-in');
-  const [authMessage, setAuthMessage] = useState('');
-  const [text, setText] = useState(sampleText);
-  const [result, setResult] = useState<AnalysisResult | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState('');
   const [error, setError] = useState('');
+  const [functionResult, setFunctionResult] = useState<ProtectedApiResponse | null>(null);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
+    let isMounted = true;
+
+    supabase.auth.getSession().then(({ data, error: sessionError }) => {
+      if (!isMounted) return;
+
+      if (sessionError) {
+        setError(sessionError.message);
+      }
+
       setSession(data.session);
-      setAuthLoading(false);
+      setInitializing(false);
     });
 
-    const { data: subscription } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data: authListener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
-      setAuthLoading(false);
+      setInitializing(false);
     });
 
-    return () => subscription.subscription.unsubscribe();
+    return () => {
+      isMounted = false;
+      authListener.subscription.unsubscribe();
+    };
   }, []);
 
-  const sortedKeywords = useMemo(
-    () => result?.keywords.slice().sort((a, b) => a.rank - b.rank) ?? [],
-    [result],
-  );
-
-  async function handleAuth(event: FormEvent<HTMLFormElement>) {
+  async function handleAuthSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError('');
-    setAuthMessage('');
     setAuthLoading(true);
+    setError('');
+    setMessage('');
+    setFunctionResult(null);
 
     try {
+      const credentials = { email, password };
       const { error: authError } = authMode === 'sign-in'
-        ? await supabase.auth.signInWithPassword({ email, password })
-        : await supabase.auth.signUp({ email, password });
+        ? await supabase.auth.signInWithPassword(credentials)
+        : await supabase.auth.signUp(credentials);
 
       if (authError) {
         throw authError;
       }
 
-      setAuthMessage(
+      setMessage(
         authMode === 'sign-in'
           ? 'Signed in successfully.'
-          : 'Sign-up requested. Check your email if confirmation is enabled.',
+          : 'Account created. Check your email if confirmation is enabled for your Supabase project.',
       );
+      setPassword('');
     } catch (authError) {
-      setError(asErrorMessage(authError));
+      setError(getErrorMessage(authError));
     } finally {
       setAuthLoading(false);
     }
   }
 
-  async function handleAnalyze() {
-    if (!session) {
-      setError('Please sign in before analyzing patent text.');
-      return;
-    }
-
-    if (!text.trim()) {
-      setError('Enter English or Japanese patent text to analyze.');
-      return;
-    }
-
-    setLoading(true);
+  async function handleSignOut() {
+    setAuthLoading(true);
     setError('');
-    setResult(null);
+    setMessage('');
+    setFunctionResult(null);
 
     try {
-      const response = await fetch(analyzeEndpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json; charset=utf-8',
-          Authorization: `Bearer ${session.access_token}`,
-          apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
-        },
-        body: JSON.stringify({ text }),
-      });
+      const { error: signOutError } = await supabase.auth.signOut();
 
-      const payload = await response.json().catch(() => null);
-
-      if (!response.ok) {
-        throw new Error(payload?.error ?? `Analyze request failed with status ${response.status}.`);
+      if (signOutError) {
+        throw signOutError;
       }
-
-      setResult(payload as AnalysisResult);
-    } catch (analyzeError) {
-      setError(asErrorMessage(analyzeError));
+    } catch (signOutError) {
+      setError(getErrorMessage(signOutError));
     } finally {
-      setLoading(false);
+      setAuthLoading(false);
     }
   }
 
-  async function handleSignOut() {
-    await supabase.auth.signOut();
-    setResult(null);
+  async function callProtectedFunction() {
+    if (!session) {
+      setError('You must be signed in before calling the protected Edge Function.');
+      return;
+    }
+
+    setFunctionLoading(true);
+    setError('');
+    setMessage('');
+    setFunctionResult(null);
+
+    try {
+      const { data, error: functionError } = await supabase.functions.invoke<ProtectedApiResponse>(
+        'protected-api',
+        {
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        },
+      );
+
+      if (functionError) {
+        throw functionError;
+      }
+
+      setFunctionResult(data ?? null);
+    } catch (functionError) {
+      setError(getErrorMessage(functionError));
+    } finally {
+      setFunctionLoading(false);
+    }
   }
 
-  if (authLoading && !session) {
-    return <main className="shell"><p className="status-card">Loading authentication…</p></main>;
+  if (initializing) {
+    return (
+      <main className="page centered">
+        <section className="card">
+          <p className="muted">Loading session…</p>
+        </section>
+      </main>
+    );
   }
 
   if (!session) {
     return (
-      <main className="shell auth-shell">
+      <main className="page centered">
         <section className="card auth-card">
-          <p className="eyebrow">Patent AI Analysis</p>
-          <h1>Sign in to classify patent keywords</h1>
+          <p className="eyebrow">Supabase Auth</p>
+          <h1>{authMode === 'sign-in' ? 'Sign in' : 'Create an account'}</h1>
           <p className="muted">
-            Authenticate with Supabase before sending text to the secure Edge Function. The OpenAI API key stays server-side.
+            Use email and password authentication. The browser only uses your Supabase URL and anon key.
           </p>
 
-          <form onSubmit={handleAuth} className="auth-form">
+          <form className="form" onSubmit={handleAuthSubmit}>
             <label>
               Email
-              <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
+              <input
+                autoComplete="email"
+                onChange={(event) => setEmail(event.target.value)}
+                required
+                type="email"
+                value={email}
+              />
             </label>
+
             <label>
               Password
-              <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required minLength={6} />
+              <input
+                autoComplete={authMode === 'sign-in' ? 'current-password' : 'new-password'}
+                minLength={6}
+                onChange={(event) => setPassword(event.target.value)}
+                required
+                type="password"
+                value={password}
+              />
             </label>
-            <button className="primary" type="submit" disabled={authLoading}>
-              {authLoading ? 'Working…' : authMode === 'sign-in' ? 'Sign in' : 'Create account'}
+
+            <button className="primary" disabled={authLoading} type="submit">
+              {authLoading ? 'Please wait…' : authMode === 'sign-in' ? 'Sign in' : 'Sign up'}
             </button>
           </form>
 
-          <button className="link-button" type="button" onClick={() => setAuthMode(authMode === 'sign-in' ? 'sign-up' : 'sign-in')}>
+          <button
+            className="link-button"
+            onClick={() => {
+              setAuthMode((currentMode) => (currentMode === 'sign-in' ? 'sign-up' : 'sign-in'));
+              setError('');
+              setMessage('');
+            }}
+            type="button"
+          >
             {authMode === 'sign-in' ? 'Need an account? Sign up' : 'Already have an account? Sign in'}
           </button>
-          {authMessage && <p className="success">{authMessage}</p>}
+
+          {message && <p className="success">{message}</p>}
           {error && <p className="error">{error}</p>}
         </section>
       </main>
@@ -152,91 +200,41 @@ export default function App() {
   }
 
   return (
-    <main className="shell">
-      <header className="hero">
+    <main className="page">
+      <section className="hero card">
         <div>
-          <p className="eyebrow">English / Japanese Patent Intelligence</p>
-          <h1>Keyword Extraction & Classification Analysis</h1>
+          <p className="eyebrow">Protected dashboard</p>
+          <h1>Welcome{session.user.email ? `, ${session.user.email}` : ''}</h1>
           <p className="muted">
-            Extract normalized technical terms, rank frequencies, and map likely IPC, CPC, FI, and F-term codes using a Supabase Edge Function.
+            You are authenticated with Supabase. Call the protected Edge Function to verify your JWT on the server.
           </p>
         </div>
-        <div className="user-panel">
-          <span>{session.user.email}</span>
-          <button type="button" className="secondary" onClick={handleSignOut}>Sign out</button>
-        </div>
-      </header>
-
-      <section className="card input-card">
-        <div className="section-heading">
-          <h2>Patent text</h2>
-          <span>{text.length.toLocaleString()} characters</span>
-        </div>
-        <textarea
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          placeholder="Paste English or Japanese patent claims, abstracts, or descriptions…"
-          spellCheck={false}
-        />
-        <div className="actions">
-          <button className="primary" type="button" onClick={handleAnalyze} disabled={loading}>
-            {loading ? 'Analyzing…' : 'Analyze'}
-          </button>
-          <button className="secondary" type="button" onClick={() => setText('')} disabled={loading}>Clear</button>
-        </div>
-        {error && <p className="error">{error}</p>}
+        <button className="secondary" disabled={authLoading} onClick={handleSignOut} type="button">
+          {authLoading ? 'Signing out…' : 'Sign out'}
+        </button>
       </section>
 
-      {loading && <p className="status-card">Analyzing text securely through Supabase Edge Functions…</p>}
+      <section className="card stack">
+        <div>
+          <h2>Protected server-side logic</h2>
+          <p className="muted">
+            This button invokes <code>protected-api</code> with <code>supabase.functions.invoke()</code> and sends the current user JWT in the Authorization header.
+          </p>
+        </div>
 
-      {result && (
-        <section className="card results-card">
-          <div className="section-heading">
-            <div>
-              <h2>Results</h2>
-              <p className="muted">Detected language: <strong>{result.language}</strong></p>
-            </div>
-            <button className="primary" type="button" onClick={() => downloadAnalysisPdf(result)} disabled={result.keywords.length === 0}>
-              Download PDF
-            </button>
-          </div>
-          {result.warning && <p className="warning">{result.warning}</p>}
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Term</th>
-                  <th>Normalized Term</th>
-                  <th>Count</th>
-                  <th>Rank</th>
-                  <th>IPC</th>
-                  <th>CPC</th>
-                  <th>FI</th>
-                  <th>F-term</th>
-                  <th>Confidence</th>
-                  <th>Reason</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedKeywords.map((keyword) => (
-                  <tr key={`${keyword.rank}-${keyword.normalized_term}`}>
-                    <td>{keyword.term}</td>
-                    <td>{keyword.normalized_term}</td>
-                    <td>{keyword.count}</td>
-                    <td>{keyword.rank}</td>
-                    <td>{keyword.ipc.join(', ') || '—'}</td>
-                    <td>{keyword.cpc.join(', ') || '—'}</td>
-                    <td>{keyword.fi.join(', ') || '—'}</td>
-                    <td>{keyword.f_term.join(', ') || '—'}</td>
-                    <td><span className={`badge ${keyword.classification_confidence}`}>{keyword.classification_confidence}</span></td>
-                    <td>{keyword.reason}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
+        <button className="primary" disabled={functionLoading} onClick={callProtectedFunction} type="button">
+          {functionLoading ? 'Calling Edge Function…' : 'Call protected-api'}
+        </button>
+
+        {message && <p className="success">{message}</p>}
+        {error && <p className="error">{error}</p>}
+
+        {functionResult && (
+          <pre className="result" aria-label="Protected API response">
+            {JSON.stringify(functionResult, null, 2)}
+          </pre>
+        )}
+      </section>
     </main>
   );
 }

@@ -1,5 +1,5 @@
 {
-  "name": "patent-keyword-classification-app",
+  "name": "supabase-auth-edge-functions-app",
   "private": true,
   "version": "0.1.0",
   "type": "module",
@@ -10,16 +10,14 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.75.0",
-    "@vitejs/plugin-react": "^5.0.4",
-    "jspdf": "^3.0.3",
-    "jspdf-autotable": "^5.0.2",
-    "vite": "^7.1.9",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },
   "devDependencies": {
-    "typescript": "^5.9.3",
     "@types/react": "^19.1.16",
-    "@types/react-dom": "^19.1.9"
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^5.0.4",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.9"
   }
 }

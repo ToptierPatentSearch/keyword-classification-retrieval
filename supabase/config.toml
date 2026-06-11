@@ -1,0 +1,7 @@
+# Disable Supabase gateway JWT checks so browser CORS preflight requests can reach
+# the functions. Each function verifies the user JWT inside the handler instead.
+[functions.analyze]
+verify_jwt = false
+
+[functions.protected-api]
+verify_jwt = false

@@ -76,3 +76,6 @@ tr:last-child td { border-bottom: 0; }
   .user-panel { border-radius: 18px; justify-content: space-between; }
   .card { padding: 18px; }
 }
+
+.protected-card { margin-top: 22px; }
+.result { overflow-x: auto; border: 1px solid #cbd5e1; border-radius: 16px; background: #0f172a; color: #dbeafe; margin: 0; padding: 18px; }

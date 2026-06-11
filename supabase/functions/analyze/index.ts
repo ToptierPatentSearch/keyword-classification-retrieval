@@ -1,4 +1,5 @@
 import OpenAI from 'npm:openai@^5.0.0';
+import { createClient } from 'jsr:@supabase/supabase-js@2';
 
 type Confidence = 'high' | 'medium' | 'low';
 type PatentLanguage = 'en' | 'ja';
@@ -26,9 +27,21 @@ interface AnalysisResult {
   warning?: string;
 }
 
+const allowedHeaders = [
+  'authorization',
+  'x-client-info',
+  'apikey',
+  'content-type',
+  'x-region',
+  'x-retry-count',
+  'traceparent',
+  'tracestate',
+  'baggage',
+].join(', ');
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers': allowedHeaders,
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
   'Access-Control-Max-Age': '86400',
 };
@@ -87,6 +100,51 @@ function jsonResponse(body: unknown, init: ResponseInit = {}) {
       ...(init.headers ?? {}),
     },
   });
+}
+
+function readBearerToken(request: Request): string | null {
+  const authorization = request.headers.get('Authorization');
+
+  if (!authorization) {
+    return null;
+  }
+
+  const [scheme, token] = authorization.split(' ');
+
+  if (scheme?.toLowerCase() !== 'bearer' || !token) {
+    return null;
+  }
+
+  return token;
+}
+
+async function verifyAuthenticatedUser(token: string) {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL');
+  const supabaseAnonKey = Deno.env.get('SUPABASE_ANON_KEY');
+
+  if (!supabaseUrl || !supabaseAnonKey) {
+    throw new Error('Supabase environment variables are not configured.');
+  }
+
+  const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
+    global: {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+  });
+
+  const { data, error } = await supabase.auth.getUser(token);
+
+  if (error || !data.user) {
+    return null;
+  }
+
+  return data.user;
 }
 
 function validateText(body: AnalyzeRequest): string {
@@ -192,19 +250,31 @@ Deno.serve(async (request) => {
     return jsonResponse({ error: 'Method not allowed. Use POST.' }, { status: 405 });
   }
 
-  const apiKey = Deno.env.get('OPENAI_API_KEY');
-  if (!apiKey) {
-    return jsonResponse({ error: 'OPENAI_API_KEY is not configured in Supabase secrets.' }, { status: 500 });
+  const token = readBearerToken(request);
+
+  if (!token) {
+    return jsonResponse({ error: 'Missing or invalid Authorization header.' }, { status: 401 });
   }
 
   try {
+    const user = await verifyAuthenticatedUser(token);
+
+    if (!user) {
+      return jsonResponse({ error: 'Unauthorized.' }, { status: 401 });
+    }
+
+    const apiKey = Deno.env.get('OPENAI_API_KEY');
+    if (!apiKey) {
+      return jsonResponse({ error: 'OPENAI_API_KEY is not configured in Supabase secrets.' }, { status: 500 });
+    }
+
     const body = await request.json() as AnalyzeRequest;
     const text = validateText(body);
     const result = await analyzePatentText(text, apiKey);
     return jsonResponse(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to analyze patent text.';
-    const status = message.includes('too long') ? 413 : 400;
+    const status = message.includes('too long') ? 413 : message.includes('Supabase environment') ? 500 : 400;
     return jsonResponse({ error: message }, { status });
   }
 });

@@ -34,6 +34,10 @@ After signing in, the dashboard can:
 - Call the `analyze` Edge Function from the **Analyze** button using `supabase.functions.invoke()` and the current user's JWT.
 - Call the `protected-api` Edge Function using `supabase.functions.invoke()` and the current user's JWT.
 
+## Edge Function CORS/JWT note
+
+The repository root includes `supabase/config.toml` with `verify_jwt = false` for the example functions. This prevents the Supabase gateway from blocking browser CORS preflight requests before the function can return CORS headers. The functions remain protected because they read the `Authorization` header and verify the user JWT inside the handler.
+
 ## Build
 
 ```bash

@@ -84,11 +84,11 @@ supabase secrets set OPENAI_MODEL=gpt-4.1-mini
 
 ## Deploy the Edge Functions
 
-Deploy both protected functions from the repository root:
+Deploy both protected functions from the repository root. The checked-in `supabase/config.toml` is important because it lets CORS preflight requests reach the functions while the functions still verify the JWT themselves:
 
 ```bash
-supabase functions deploy analyze
-supabase functions deploy protected-api
+supabase functions deploy analyze --no-verify-jwt
+supabase functions deploy protected-api --no-verify-jwt
 ```
 
 The deployed functions are available at:
@@ -98,7 +98,7 @@ https://your-project-ref.supabase.co/functions/v1/analyze
 https://your-project-ref.supabase.co/functions/v1/protected-api
 ```
 
-The frontend calls both functions with `supabase.functions.invoke()` and explicitly includes the signed-in user's JWT in the `Authorization: Bearer <token>` header. Keep JWT verification enabled for both functions unless you intentionally replace it with custom verification.
+The frontend calls both functions with `supabase.functions.invoke()` and explicitly includes the signed-in user's JWT in the `Authorization: Bearer <token>` header. `supabase/config.toml` disables the Supabase gateway JWT check for these functions so browser CORS preflight requests are not blocked; each function verifies the JWT inside its handler before running protected logic.
 
 ## Security notes
 

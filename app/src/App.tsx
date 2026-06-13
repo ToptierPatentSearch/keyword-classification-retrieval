@@ -213,7 +213,7 @@ export default function App() {
               <h2>Results</h2>
               <p className="muted">Detected language: <strong>{result.language}</strong></p>
             </div>
-            <button className="primary" type="button" onClick={handleDownloadPdf} disabled={result.keywords.length === 0 || pdfLoading}>
+            <button className="primary" type="button" onClick={handleDownloadPdf} disabled={!Array.isArray(result.keywords) || result.keywords.length === 0 || pdfLoading}>
               {pdfLoading ? 'Preparing PDF…' : 'Download PDF'}
             </button>
           </div>

@@ -84,7 +84,7 @@ export default function App() {
     setResult(null);
 
     try {
-      const { data, error: functionError } = await supabase.functions.invoke<AnalysisResult>('analyze', {
+      const { data, error: functionError } = await supabase.functions.invoke<AnalysisResult>("openai-proxy", {
         body: { text },
       });
 

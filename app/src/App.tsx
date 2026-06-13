@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
-import { analyzeEndpoint, supabase } from './supabaseClient';
+import { supabase } from './supabaseClient';
 import type { AnalysisResult } from './types';
 
 const sampleText = `A semiconductor device includes an AI-based defect detection unit. The artificial intelligence model analyzes wafer inspection images and classifies process abnormalities.\n半導体装置は、ウェハ検査画像を解析する人工知能モデルを含む。`;
@@ -84,23 +84,19 @@ export default function App() {
     setResult(null);
 
     try {
-      const response = await fetch(analyzeEndpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json; charset=utf-8',
-          Authorization: `Bearer ${session.access_token}`,
-          apikey: import.meta.env.VITE_SUPABASE_ANON_KEY,
-        },
-        body: JSON.stringify({ text }),
+      const { data, error: functionError } = await supabase.functions.invoke<AnalysisResult>('analyze', {
+        body: { text },
       });
 
-      const payload = await response.json().catch(() => null);
-
-      if (!response.ok) {
-        throw new Error(payload?.error ?? `Analyze request failed with status ${response.status}.`);
+      if (functionError) {
+        throw functionError;
       }
 
-      setResult(payload as AnalysisResult);
+      if (!data) {
+        throw new Error('Analyze request completed without returning a result.');
+      }
+
+      setResult(data);
     } catch (analyzeError) {
       setError(asErrorMessage(analyzeError));
     } finally {

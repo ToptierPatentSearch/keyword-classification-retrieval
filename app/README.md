@@ -27,7 +27,7 @@ For a production build:
 npm run build
 ```
 
-## 2. Configure Supabase URL and anon key
+## 2. Configure Supabase URL and publishable key
 
 Copy the browser-safe environment example:
 
@@ -39,7 +39,7 @@ Edit `.env.local`:
 
 ```bash
 VITE_SUPABASE_URL=https://your-project-ref.supabase.co
-VITE_SUPABASE_ANON_KEY=your-supabase-anon-key
+VITE_SUPABASE_PUBLISHABLE_KEY=your-supabase-publishable-or-anon-key
 VITE_BASE_PATH=/
 ```
 
@@ -92,7 +92,7 @@ The frontend calls:
 https://your-project-ref.supabase.co/functions/v1/analyze
 ```
 
-The request includes the user's Supabase access token and the anon key in headers. Keep JWT verification enabled for the deployed function unless you intentionally make it public.
+The request includes the user's Supabase access token and the publishable key in headers. Keep JWT verification enabled for the deployed function unless you intentionally make it public.
 
 ## 5. Deploy the frontend to GitHub Pages
 
@@ -139,6 +139,6 @@ Then publish `app/dist` to GitHub Pages. Common options include:
 ## Security notes
 
 - `OPENAI_API_KEY` is read only by `supabase/functions/analyze/index.ts` from Supabase secrets.
-- The frontend uses only `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`.
+- The frontend uses only `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`.
 - No `server.js` or Express server is required.
 - Do not commit `.env.local` or any file containing API keys.

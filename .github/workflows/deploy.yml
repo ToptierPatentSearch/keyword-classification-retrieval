@@ -28,9 +28,11 @@ jobs:
 
       - name: Install dependencies
         run: npm install
+        working-directory: app
 
       - name: Build
         run: npm run build
+        working-directory: app
 
       - name: Upload Vite dist
         uses: actions/upload-pages-artifact@v3

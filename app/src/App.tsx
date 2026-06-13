@@ -1,7 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { analyzeEndpoint, supabase } from './supabaseClient';
-import { downloadAnalysisPdf } from './pdf';
 import type { AnalysisResult } from './types';
 
 const sampleText = `A semiconductor device includes an AI-based defect detection unit. The artificial intelligence model analyzes wafer inspection images and classifies process abnormalities.\n半導体装置は、ウェハ検査画像を解析する人工知能モデルを含む。`;
@@ -20,6 +19,7 @@ export default function App() {
   const [text, setText] = useState(sampleText);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -105,6 +105,24 @@ export default function App() {
       setError(asErrorMessage(analyzeError));
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function handleDownloadPdf() {
+    if (!result) {
+      return;
+    }
+
+    setPdfLoading(true);
+    setError('');
+
+    try {
+      const { downloadAnalysisPdf } = await import('./pdf');
+      downloadAnalysisPdf(result);
+    } catch (pdfError) {
+      setError(asErrorMessage(pdfError));
+    } finally {
+      setPdfLoading(false);
     }
   }
 
@@ -196,8 +214,8 @@ export default function App() {
               <h2>Results</h2>
               <p className="muted">Detected language: <strong>{result.language}</strong></p>
             </div>
-            <button className="primary" type="button" onClick={() => downloadAnalysisPdf(result)} disabled={result.keywords.length === 0}>
-              Download PDF
+            <button className="primary" type="button" onClick={handleDownloadPdf} disabled={result.keywords.length === 0 || pdfLoading}>
+              {pdfLoading ? 'Preparing PDF…' : 'Download PDF'}
             </button>
           </div>
           {result.warning && <p className="warning">{result.warning}</p>}

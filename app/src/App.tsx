@@ -37,9 +37,12 @@ export default function App() {
   }, []);
 
   const sortedKeywords = useMemo(
-    () => result?.keywords.slice().sort((a, b) => a.rank - b.rank) ?? [],
-    [result],
-  );
+  () =>
+    Array.isArray(result?.keywords)
+      ? result.keywords.slice().sort((a, b) => a.rank - b.rank)
+      : [],
+  [result],
+);
 
   async function handleAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

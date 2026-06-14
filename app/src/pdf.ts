@@ -25,7 +25,7 @@ export function downloadAnalysisPdf(result: AnalysisResult): void {
 
   autoTable(doc, {
     startY: result.warning ? 116 : 100,
-    head: [['Term', 'Normalized Term', 'Count', 'Rank', 'IPC', 'CPC', 'FI', 'F-term', 'Confidence']],
+    head: [['Term', 'Normalized Term', 'Count', 'Rank', 'IPC', 'CPC', 'FI', 'F-term', 'Confidence', 'Reason']],
     body: result.keywords.map((keyword) => [
       keyword.term,
       keyword.normalized_term,
@@ -36,6 +36,7 @@ export function downloadAnalysisPdf(result: AnalysisResult): void {
       joinCodes(keyword.fi),
       joinCodes(keyword.f_term),
       keyword.classification_confidence,
+      keyword.reason,
     ]),
     styles: { fontSize: 8, cellPadding: 4, overflow: 'linebreak' },
     headStyles: { fillColor: [31, 84, 135] },
@@ -45,7 +46,8 @@ export function downloadAnalysisPdf(result: AnalysisResult): void {
       4: { cellWidth: 90 },
       5: { cellWidth: 90 },
       6: { cellWidth: 80 },
-      7: { cellWidth: 90 },
+      7: { cellWidth: 80 },
+      9: { cellWidth: 140 },
     },
   });
 

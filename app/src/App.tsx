@@ -3,6 +3,17 @@ import type { Session } from '@supabase/supabase-js';
 import { supabase } from './supabaseClient';
 import type { AnalysisResult } from './types';
 
+function estimateOutputTimeSeconds(inputText: string): { min: number; max: number } {
+  const characters = inputText.trim().length;
+  const keywordComplexity = Math.min(20, Math.ceil(characters / 1200) * 4);
+  const longDocumentComplexity = characters > 12000 ? 18 : characters > 6000 ? 10 : characters > 2500 ? 5 : 0;
+  const pdfPreparationBuffer = 4;
+  const min = Math.max(15, 14 + keywordComplexity + Math.floor(longDocumentComplexity / 2));
+  const max = Math.max(min + 12, 28 + keywordComplexity + longDocumentComplexity + pdfPreparationBuffer);
+
+  return { min, max };
+}
+
 const sampleText = `A semiconductor device includes an AI-based defect detection unit. The artificial intelligence model analyzes wafer inspection images and classifies process abnormalities.\n半導体装置は、ウェハ検査画像を解析する人工知能モデルを含む。`;
 
 function asErrorMessage(error: unknown): string {
@@ -21,6 +32,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [error, setError] = useState('');
+  const [estimatedOutputTime, setEstimatedOutputTime] = useState<{ min: number; max: number } | null>(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -85,10 +97,11 @@ export default function App() {
     setLoading(true);
     setError('');
     setResult(null);
+    setEstimatedOutputTime(estimateOutputTimeSeconds(text));
 
     try {
-      const { data, error: functionError } = await supabase.functions.invoke<AnalysisResult>("openai-proxy", {
-        body: { input: text },
+      const { data, error: functionError } = await supabase.functions.invoke<AnalysisResult>('analyze', {
+        body: { text },
       });
 
       if (functionError) {
@@ -128,6 +141,7 @@ export default function App() {
   async function handleSignOut() {
     await supabase.auth.signOut();
     setResult(null);
+    setEstimatedOutputTime(null);
   }
 
   if (authLoading && !session) {
@@ -204,21 +218,31 @@ export default function App() {
         {error && <p className="error">{error}</p>}
       </section>
 
-      {loading && <p className="status-card">Analyzing text securely through Supabase Edge Functions…</p>}
-
-      {result && (
+      {(loading || result) && (
         <section className="card results-card">
           <div className="section-heading">
             <div>
               <h2>Results</h2>
-              <p className="muted">Detected language: <strong>{result.language}</strong></p>
+              {result ? (
+                <p className="muted">Detected language: <strong>{result.language}</strong></p>
+              ) : (
+                <p className="muted">Waiting for the GPT analysis response.</p>
+              )}
             </div>
-            <button className="primary" type="button" onClick={handleDownloadPdf} disabled={!Array.isArray(result.keywords) || result.keywords.length === 0 || pdfLoading}>
-              {pdfLoading ? 'Preparing PDF…' : 'Download PDF'}
-            </button>
+            {result && (
+              <button className="primary" type="button" onClick={handleDownloadPdf} disabled={!Array.isArray(result.keywords) || result.keywords.length === 0 || pdfLoading}>
+                {pdfLoading ? 'Preparing PDF…' : 'Download PDF'}
+              </button>
+            )}
           </div>
-          {result.warning && <p className="warning">{result.warning}</p>}
-          <div className="table-wrap">
+          {loading && estimatedOutputTime && (
+            <div className="estimate-card" role="status" aria-live="polite">
+              <strong>Estimated output time: about {estimatedOutputTime.min}–{estimatedOutputTime.max} seconds.</strong>
+              <span>This is a heuristic estimate, not a guaranteed completion time. Analyzing text securely through Supabase Edge Functions…</span>
+            </div>
+          )}
+          {result?.warning && <p className="warning">{result.warning}</p>}
+          {result && <div className="table-wrap">
             <table>
               <thead>
                 <tr>
@@ -251,7 +275,7 @@ export default function App() {
                 ))}
               </tbody>
             </table>
-          </div>
+          </div>}
         </section>
       )}
     </main>

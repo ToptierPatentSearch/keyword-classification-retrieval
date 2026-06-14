@@ -31,6 +31,8 @@ h2 { font-size: 1.35rem; }
 .card, .status-card { background: rgba(255, 255, 255, 0.94); border: 1px solid #dbe5f0; border-radius: 22px; box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08); }
 .card { padding: 24px; }
 .status-card { padding: 18px 20px; color: #475569; }
+.estimate-card { display: grid; gap: 8px; margin-bottom: 16px; padding: 16px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 16px; color: #1e3a8a; line-height: 1.5; }
+.estimate-card span { color: #475569; }
 .auth-card { width: min(460px, 100%); }
 
 .auth-form { display: grid; gap: 16px; margin-top: 24px; }

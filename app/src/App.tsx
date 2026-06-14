@@ -37,12 +37,12 @@ export default function App() {
   }, []);
 
   const sortedKeywords = useMemo(
-  () =>
-    Array.isArray(result?.keywords)
-      ? result.keywords.slice().sort((a, b) => a.rank - b.rank)
-      : [],
-  [result],
-);
+    () =>
+      Array.isArray(result?.keywords)
+        ? result.keywords.slice().sort((a, b) => a.rank - b.rank)
+        : [],
+    [result],
+  );
 
   async function handleAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -87,8 +87,8 @@ export default function App() {
     setResult(null);
 
     try {
-      const { data, error: functionError } = await supabase.functions.invoke<AnalysisResult>("openai-proxy", {
-        body: { input: text },
+      const { data, error: functionError } = await supabase.functions.invoke<AnalysisResult>('analyze', {
+        body: { text },
       });
 
       if (functionError) {

@@ -5,6 +5,7 @@ type PatentLanguage = 'en' | 'ja';
 
 interface AnalyzeRequest {
   text?: unknown;
+  input?: unknown;
 }
 
 interface KeywordClassification {
@@ -90,11 +91,13 @@ function jsonResponse(body: unknown, init: ResponseInit = {}) {
 }
 
 function validateText(body: AnalyzeRequest): string {
-  if (typeof body.text !== 'string') {
+  const rawText = typeof body.text === 'string' ? body.text : body.input;
+
+  if (typeof rawText !== 'string') {
     throw new Error('Request body must include a string field named "text".');
   }
 
-  const text = body.text.trim();
+  const text = rawText.trim();
   if (!text) {
     throw new Error('Text must not be empty.');
   }
@@ -149,6 +152,7 @@ Tasks:
 - Normalize synonyms into a canonical normalized_term, including examples such as AI/artificial intelligence and semiconductor device/semiconductor apparatus.
 - Count occurrences across direct terms and clear synonyms; rank by descending frequency.
 - Map each keyword to likely IPC, CPC, FI, and F-term codes when supportable.
+- For every keyword object, include a concise but specific reason explaining why the keyword and classifications were selected from the input evidence.
 - First attempt classification mapping using your knowledge. If uncertain, set classification_confidence to low.
 - Do not invent overly specific FI or F-term codes. Leave arrays empty when a code family cannot be responsibly inferred.
 - Prefer concise reasons and keep the output extensible for future USPTO CPC, WIPO IPC, and JPO FI/F-term data integration.`,

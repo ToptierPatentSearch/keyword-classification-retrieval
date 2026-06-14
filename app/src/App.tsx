@@ -3,6 +3,16 @@ import type { Session } from '@supabase/supabase-js';
 import { supabase } from './supabaseClient';
 import type { AnalysisResult } from './types';
 
+function estimateOutputTime(textLength: number, includePdf = false): string {
+  const baseSeconds = 20;
+  const lengthSeconds = Math.ceil(textLength / 2500) * 5;
+  const pdfSeconds = includePdf ? 5 : 0;
+  const lower = Math.min(90, baseSeconds + lengthSeconds + pdfSeconds);
+  const upper = Math.min(120, lower + 20 + Math.ceil(textLength / 10000) * 10);
+
+  return `Estimated output time: about ${lower}–${upper} seconds. This is a heuristic estimate, not a guarantee.`;
+}
+
 const sampleText = `A semiconductor device includes an AI-based defect detection unit. The artificial intelligence model analyzes wafer inspection images and classifies process abnormalities.\n半導体装置は、ウェハ検査画像を解析する人工知能モデルを含む。`;
 
 function asErrorMessage(error: unknown): string {
@@ -18,6 +28,7 @@ export default function App() {
   const [authMessage, setAuthMessage] = useState('');
   const [text, setText] = useState(sampleText);
   const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [estimatedOutputTime, setEstimatedOutputTime] = useState('');
   const [loading, setLoading] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [error, setError] = useState('');
@@ -37,12 +48,12 @@ export default function App() {
   }, []);
 
   const sortedKeywords = useMemo(
-  () =>
-    Array.isArray(result?.keywords)
-      ? result.keywords.slice().sort((a, b) => a.rank - b.rank)
-      : [],
-  [result],
-);
+    () =>
+      Array.isArray(result?.keywords)
+        ? result.keywords.slice().sort((a, b) => a.rank - b.rank)
+        : [],
+    [result],
+  );
 
   async function handleAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -85,10 +96,11 @@ export default function App() {
     setLoading(true);
     setError('');
     setResult(null);
+    setEstimatedOutputTime(estimateOutputTime(text.trim().length));
 
     try {
-      const { data, error: functionError } = await supabase.functions.invoke<AnalysisResult>("openai-proxy", {
-        body: { input: text },
+      const { data, error: functionError } = await supabase.functions.invoke<AnalysisResult>('analyze', {
+        body: { text },
       });
 
       if (functionError) {
@@ -115,8 +127,9 @@ export default function App() {
     setPdfLoading(true);
     setError('');
 
+    const { downloadAnalysisPdf } = await import('./pdf');
+
     try {
-      const { downloadAnalysisPdf } = await import('./pdf');
       downloadAnalysisPdf(result);
     } catch (pdfError) {
       setError(asErrorMessage(pdfError));
@@ -128,6 +141,7 @@ export default function App() {
   async function handleSignOut() {
     await supabase.auth.signOut();
     setResult(null);
+    setEstimatedOutputTime('');
   }
 
   if (authLoading && !session) {
@@ -204,54 +218,64 @@ export default function App() {
         {error && <p className="error">{error}</p>}
       </section>
 
-      {loading && <p className="status-card">Analyzing text securely through Supabase Edge Functions…</p>}
-
-      {result && (
+      {(loading || result) && (
         <section className="card results-card">
-          <div className="section-heading">
-            <div>
+          {loading && (
+            <div className="output-status">
               <h2>Results</h2>
-              <p className="muted">Detected language: <strong>{result.language}</strong></p>
+              <p className="estimate">{estimatedOutputTime}</p>
+              <p className="muted">Analyzing text securely through Supabase Edge Functions…</p>
             </div>
-            <button className="primary" type="button" onClick={handleDownloadPdf} disabled={!Array.isArray(result.keywords) || result.keywords.length === 0 || pdfLoading}>
-              {pdfLoading ? 'Preparing PDF…' : 'Download PDF'}
-            </button>
-          </div>
-          {result.warning && <p className="warning">{result.warning}</p>}
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Term</th>
-                  <th>Normalized Term</th>
-                  <th>Count</th>
-                  <th>Rank</th>
-                  <th>IPC</th>
-                  <th>CPC</th>
-                  <th>FI</th>
-                  <th>F-term</th>
-                  <th>Confidence</th>
-                  <th>Reason</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedKeywords.map((keyword) => (
-                  <tr key={`${keyword.rank}-${keyword.normalized_term}`}>
-                    <td>{keyword.term}</td>
-                    <td>{keyword.normalized_term}</td>
-                    <td>{keyword.count}</td>
-                    <td>{keyword.rank}</td>
-                    <td>{keyword.ipc.join(', ') || '—'}</td>
-                    <td>{keyword.cpc.join(', ') || '—'}</td>
-                    <td>{keyword.fi.join(', ') || '—'}</td>
-                    <td>{keyword.f_term.join(', ') || '—'}</td>
-                    <td><span className={`badge ${keyword.classification_confidence}`}>{keyword.classification_confidence}</span></td>
-                    <td>{keyword.reason}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          )}
+
+          {result && (
+            <>
+              <div className="section-heading">
+                <div>
+                  <h2>Results</h2>
+                  <p className="muted">Detected language: <strong>{result.language}</strong></p>
+                </div>
+                <button className="primary" type="button" onClick={handleDownloadPdf} disabled={!Array.isArray(result.keywords) || result.keywords.length === 0 || pdfLoading}>
+                  {pdfLoading ? 'Preparing PDF…' : 'Download PDF'}
+                </button>
+              </div>
+              {result.warning && <p className="warning">{result.warning}</p>}
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Term</th>
+                      <th>Normalized Term</th>
+                      <th>Count</th>
+                      <th>Rank</th>
+                      <th>IPC</th>
+                      <th>CPC</th>
+                      <th>FI</th>
+                      <th>F-term</th>
+                      <th>Confidence</th>
+                      <th>Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedKeywords.map((keyword) => (
+                      <tr key={`${keyword.rank}-${keyword.normalized_term}`}>
+                        <td>{keyword.term}</td>
+                        <td>{keyword.normalized_term}</td>
+                        <td>{keyword.count}</td>
+                        <td>{keyword.rank}</td>
+                        <td>{keyword.ipc.join(', ') || '—'}</td>
+                        <td>{keyword.cpc.join(', ') || '—'}</td>
+                        <td>{keyword.fi.join(', ') || '—'}</td>
+                        <td>{keyword.f_term.join(', ') || '—'}</td>
+                        <td><span className={`badge ${keyword.classification_confidence}`}>{keyword.classification_confidence}</span></td>
+                        <td>{keyword.reason}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
         </section>
       )}
     </main>

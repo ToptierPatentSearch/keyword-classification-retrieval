@@ -33,7 +33,7 @@ doc.text('Patent Keyword Analysis Report', 40, 40);
 
   autoTable(doc, {
     startY: result.warning ? 116 : 100,
-    head: [['Term', 'Normalized Term', 'Count', 'Rank', 'IPC', 'CPC', 'FI', 'F-term', 'Confidence']],
+    head: [['Term', 'Normalized Term', 'Count', 'Rank', 'IPC', 'CPC', 'FI', 'F-term', 'Confidence', 'Reason']],
     body: result.keywords.map((keyword) => [
       keyword.term,
       keyword.normalized_term,
@@ -44,6 +44,7 @@ doc.text('Patent Keyword Analysis Report', 40, 40);
       joinCodes(keyword.fi),
       joinCodes(keyword.f_term),
       keyword.classification_confidence,
+      keyword.reason,
     ]),
   styles: {
   font: 'IPAExGothic',
@@ -65,7 +66,8 @@ bodyStyles: {
       4: { cellWidth: 90 },
       5: { cellWidth: 90 },
       6: { cellWidth: 80 },
-      7: { cellWidth: 90 },
+      7: { cellWidth: 80 },
+      9: { cellWidth: 140 },
     },
   });
 

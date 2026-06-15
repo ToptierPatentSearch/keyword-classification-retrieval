@@ -149,8 +149,10 @@ Tasks:
 - Normalize synonyms into a canonical normalized_term, including examples such as AI/artificial intelligence and semiconductor device/semiconductor apparatus.
 - Count occurrences across direct terms and clear synonyms; rank by descending frequency.
 - Map each keyword to likely IPC, CPC, FI, and F-term codes when supportable.
-- First attempt classification mapping using your knowledge. If uncertain, set classification_confidence to low.
+- For every keyword result item, include a concise but specific reason explaining why the term and suggested classifications/codes were selected from the input.
+- First attempt classification mapping using your knowledge. If uncertain, set classification_confidence to low and explain the uncertainty in reason.
 - Do not invent overly specific FI or F-term codes. Leave arrays empty when a code family cannot be responsibly inferred.
+- Return a stable JSON object with language and keywords; each keyword item must include term, normalized_term, count, rank, ipc, cpc, fi, f_term, classification_confidence, and reason.
 - Prefer concise reasons and keep the output extensible for future USPTO CPC, WIPO IPC, and JPO FI/F-term data integration.`,
           },
         ],

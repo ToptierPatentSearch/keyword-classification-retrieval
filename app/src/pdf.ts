@@ -1,3 +1,4 @@
+import IPAexGothic from './fonts/ipaexg.ttf';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { AnalysisResult } from './types';

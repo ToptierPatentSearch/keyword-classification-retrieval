@@ -6,11 +6,12 @@ import type { AnalysisResult } from './types';
 const joinCodes = (codes: string[]) => (codes.length > 0 ? codes.join(', ') : '—');
 
 export function downloadAnalysisPdf(result: AnalysisResult): void {
-  const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
 
-doc.addFileToVFS("NotoSansJP-Regular.ttf", NotoSansJP);
-doc.addFont("NotoSansJP-Regular.ttf", "NotoSansJP", "normal");
-
+doc.addFileToVFS('ipaexg.ttf', IPAexGothic);
+doc.addFont('ipaexg.ttf', 'IPAexGothic', 'normal');
+doc.setFont('IPAexGothic');
+  
 const timestamp = new Date().toLocaleString();
 
 doc.setFont("NotoSansJP");
@@ -45,7 +46,7 @@ doc.text('Patent Keyword Analysis Report', 40, 40);
       keyword.classification_confidence,
     ]),
   styles: {
-  font: 'NotoSansJP',
+  font: 'IPAExGothic',
   fontSize: 8,
   cellPadding: 4,
   overflow: 'linebreak'

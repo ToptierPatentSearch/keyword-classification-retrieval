@@ -6,13 +6,19 @@ const joinCodes = (codes: string[]) => (codes.length > 0 ? codes.join(', ') : 'â
 
 export function downloadAnalysisPdf(result: AnalysisResult): void {
   const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
-  const timestamp = new Date().toLocaleString();
 
-  doc.setFont('helvetica', 'bold');
+doc.addFileToVFS("NotoSansJP-Regular.ttf", NotoSansJP);
+doc.addFont("NotoSansJP-Regular.ttf", "NotoSansJP", "normal");
+
+const timestamp = new Date().toLocaleString();
+
+doc.setFont("NotoSansJP");
+doc.setFontSize(18);
+doc.text('Patent Keyword Analysis Report', 40, 40);
   doc.setFontSize(18);
   doc.text('Patent Keyword Analysis Report', 40, 40);
 
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('NotoSansJP');
   doc.setFontSize(10);
   doc.text(`Timestamp: ${timestamp}`, 40, 62);
   doc.text(`Detected language: ${result.language}`, 40, 78);

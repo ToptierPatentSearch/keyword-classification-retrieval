@@ -43,7 +43,19 @@ doc.text('Patent Keyword Analysis Report', 40, 40);
       joinCodes(keyword.f_term),
       keyword.classification_confidence,
     ]),
-    styles: { fontSize: 8, cellPadding: 4, overflow: 'linebreak' },
+  styles: {
+  font: 'NotoSansJP',
+  fontSize: 8,
+  cellPadding: 4,
+  overflow: 'linebreak'
+},
+headStyles: {
+  font: 'NotoSansJP',
+  fillColor: [31, 84, 135]
+},
+bodyStyles: {
+  font: 'NotoSansJP'
+},
     headStyles: { fillColor: [31, 84, 135] },
     columnStyles: {
       0: { cellWidth: 95 },

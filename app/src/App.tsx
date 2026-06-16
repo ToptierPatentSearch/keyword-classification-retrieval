@@ -3,10 +3,31 @@ import type { Session } from '@supabase/supabase-js';
 import { supabase } from './supabaseClient';
 import type { AnalysisResult } from './types';
 
-const sampleText = `A semiconductor device includes an AI-based defect detection unit. The artificial intelligence model analyzes wafer inspection images and classifies process abnormalities.\n半導体装置は、ウェハ検査画像を解析する人工知能モデルを含む。`;
-
 function asErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'An unexpected error occurred.';
+}
+
+function formatEstimatedDuration(totalSeconds: number): string {
+  if (totalSeconds < 60) {
+    return `${totalSeconds} seconds`;
+  }
+
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  return seconds === 0 ? `${minutes} minute${minutes === 1 ? '' : 's'}` : `${minutes} min ${seconds} sec`;
+}
+
+function estimateResultTime(characterCount: number): string {
+  if (characterCount === 0) {
+    return 'Estimated result time: enter patent text to calculate.';
+  }
+
+  const inputBlocks = Math.ceil(characterCount / 500);
+  const minimumSeconds = 20 + (inputBlocks * 8);
+  const maximumSeconds = minimumSeconds + 20 + (Math.ceil(characterCount / 2000) * 10);
+
+  return `Estimated result time for ${characterCount.toLocaleString()} characters: ${formatEstimatedDuration(minimumSeconds)}–${formatEstimatedDuration(maximumSeconds)}.`;
 }
 
 export default function App() {
@@ -16,7 +37,7 @@ export default function App() {
   const [password, setPassword] = useState('');
   const [authMode, setAuthMode] = useState<'sign-in' | 'sign-up'>('sign-in');
   const [authMessage, setAuthMessage] = useState('');
-  const [text, setText] = useState(sampleText);
+  const [text, setText] = useState('');
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
@@ -37,12 +58,17 @@ export default function App() {
   }, []);
 
   const sortedKeywords = useMemo(
-  () =>
-    Array.isArray(result?.keywords)
-      ? result.keywords.slice().sort((a, b) => a.rank - b.rank)
-      : [],
-  [result],
-);
+    () =>
+      Array.isArray(result?.keywords)
+        ? result.keywords.slice().sort((a, b) => a.rank - b.rank)
+        : [],
+    [result],
+  );
+
+  const estimatedResultTime = useMemo(
+    () => estimateResultTime(text.trim().length),
+    [text],
+  );
 
   async function handleAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -195,6 +221,7 @@ export default function App() {
           placeholder="Paste English or Japanese patent claims, abstracts, or descriptions…"
           spellCheck={false}
         />
+        <p className="estimate">{estimatedResultTime}</p>
         <div className="actions">
           <button className="primary" type="button" onClick={handleAnalyze} disabled={loading}>
             {loading ? 'Analyzing…' : 'Analyze'}
@@ -204,7 +231,7 @@ export default function App() {
         {error && <p className="error">{error}</p>}
       </section>
 
-      {loading && <p className="status-card">Analyzing text securely through Supabase Edge Functions…</p>}
+      {loading && <p className="status-card">Analyzing text securely through Supabase Edge Functions… {estimatedResultTime}</p>}
 
       {result && (
         <section className="card results-card">

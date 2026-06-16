@@ -1,4 +1,4 @@
-import IPAexGothic from './fonts/ipaexg.ttf';
+import IPAExGothicBase64 from './fonts/ipaexg-base64';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import type { AnalysisResult } from './types';
@@ -8,19 +8,17 @@ const joinCodes = (codes: string[]) => (codes.length > 0 ? codes.join(', ') : 'â
 export function downloadAnalysisPdf(result: AnalysisResult): void {
 const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
 
-doc.addFileToVFS('ipaexg.ttf', IPAexGothic);
-doc.addFont('ipaexg.ttf', 'IPAexGothic', 'normal');
-doc.setFont('IPAexGothic');
-  
+doc.addFileToVFS('ipaexg.ttf', IPAExGothicBase64);
+doc.addFont('ipaexg.ttf', 'IPAExGothic', 'normal');
+doc.setFont('IPAExGothic');
+   
 const timestamp = new Date().toLocaleString();
 
-doc.setFont("NotoSansJP");
+doc.setFont("IPAExGothic");
 doc.setFontSize(18);
 doc.text('Patent Keyword Analysis Report', 40, 40);
-  doc.setFontSize(18);
-  doc.text('Patent Keyword Analysis Report', 40, 40);
 
-  doc.setFont('NotoSansJP');
+  doc.setFont('IPAExGothic');
   doc.setFontSize(10);
   doc.text(`Timestamp: ${timestamp}`, 40, 62);
   doc.text(`Detected language: ${result.language}`, 40, 78);
@@ -52,13 +50,13 @@ doc.text('Patent Keyword Analysis Report', 40, 40);
   overflow: 'linebreak'
 },
 headStyles: {
-  font: 'NotoSansJP',
+  font: 'IPAExGothic',
   fillColor: [31, 84, 135]
 },
 bodyStyles: {
-  font: 'NotoSansJP'
+  font: 'IPAExGothic'
 },
-    headStyles: { fillColor: [31, 84, 135] },
+    
     columnStyles: {
       0: { cellWidth: 95 },
       1: { cellWidth: 110 },

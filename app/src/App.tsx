@@ -7,6 +7,29 @@ function asErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'An unexpected error occurred.';
 }
 
+function formatEstimatedDuration(totalSeconds: number): string {
+  if (totalSeconds < 60) {
+    return `${totalSeconds} seconds`;
+  }
+
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+
+  return seconds === 0 ? `${minutes} minute${minutes === 1 ? '' : 's'}` : `${minutes} min ${seconds} sec`;
+}
+
+function estimateResultTime(characterCount: number): string {
+  if (characterCount === 0) {
+    return 'Estimated result time: enter patent text to calculate.';
+  }
+
+  const inputBlocks = Math.ceil(characterCount / 500);
+  const minimumSeconds = 20 + (inputBlocks * 8);
+  const maximumSeconds = minimumSeconds + 20 + (Math.ceil(characterCount / 2000) * 10);
+
+  return `Estimated result time for ${characterCount.toLocaleString()} characters: ${formatEstimatedDuration(minimumSeconds)}–${formatEstimatedDuration(maximumSeconds)}.`;
+}
+
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -42,19 +65,10 @@ export default function App() {
     [result],
   );
 
-  const estimatedResultTime = useMemo(() => {
-    const characterCount = text.trim().length;
-
-    if (characterCount > 12000) {
-      return 'Estimated result time: 2–4 minutes for longer documents.';
-    }
-
-    if (characterCount > 3000) {
-      return 'Estimated result time: 60–120 seconds.';
-    }
-
-    return 'Estimated result time: 30–60 seconds.';
-  }, [text]);
+  const estimatedResultTime = useMemo(
+    () => estimateResultTime(text.trim().length),
+    [text],
+  );
 
   async function handleAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

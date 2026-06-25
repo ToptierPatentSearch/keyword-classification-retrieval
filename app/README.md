@@ -142,3 +142,50 @@ Then publish `app/dist` to GitHub Pages. Common options include:
 - The frontend uses only `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`.
 - No `server.js` or Express server is required.
 - Do not commit `.env.local` or any file containing API keys.
+
+## 6. Configure Stripe Checkout
+
+This repo includes a Supabase Edge Function at `../supabase/functions/create-checkout-session/index.ts` for creating authenticated Stripe Checkout Sessions. It uses the signed-in Supabase user as the Checkout `client_reference_id`, creates or reuses a Stripe Customer, and records each session in PostgreSQL.
+
+Apply the database migration from the repository root before deploying the function:
+
+```bash
+supabase db push
+```
+
+Set the required Stripe and Checkout secrets:
+
+```bash
+supabase secrets set \
+  STRIPE_SECRET_KEY=sk_test_or_live_key \
+  STRIPE_PRICE_ID=price_your_default_price \
+  STRIPE_CHECKOUT_SUCCESS_URL=https://your-site.example/success?session_id={CHECKOUT_SESSION_ID} \
+  STRIPE_CHECKOUT_CANCEL_URL=https://your-site.example/cancel \
+  SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+```
+
+Optional settings mirror the columns stored in `stripe_checkout_sessions`:
+
+```bash
+supabase secrets set \
+  STRIPE_CHECKOUT_MODE=subscription \
+  STRIPE_CHECKOUT_QUANTITY=1 \
+  STRIPE_ALLOW_PROMOTION_CODES=true \
+  STRIPE_TRIAL_PERIOD_DAYS=0
+```
+
+Deploy the Checkout function:
+
+```bash
+supabase functions deploy create-checkout-session
+```
+
+Call it from the frontend after sign-in with `supabase.functions.invoke('create-checkout-session', { body: { priceId, quantity } })`, then redirect the browser to the returned `url`. Keep JWT verification enabled so only authenticated users can create Checkout Sessions.
+
+The migration creates the following tables with row-level security so users can read only their own billing records:
+
+- `stripe_customers` for mapping Supabase users to Stripe Customers.
+- `stripe_checkout_sessions` for Checkout Session settings and statuses created by the function.
+- `stripe_subscriptions` for webhook-updated subscription state.
+- `stripe_payments` for webhook-updated one-time payment state.
+- `stripe_webhook_events` for webhook idempotency/audit logging.

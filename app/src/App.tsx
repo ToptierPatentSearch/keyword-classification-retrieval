@@ -3,41 +3,209 @@ import type { Session } from '@supabase/supabase-js';
 import { supabase } from './supabaseClient';
 import type { AnalysisResult } from './types';
 
+type AppLanguage = 'en' | 'ja';
+type CurrencyCode = 'usd' | 'jpy' | 'eur';
+type PlanId = 'test' | 'business';
+
+const PRICE_IDS = {
+  test_jpy: 'price_1TkwGxPgeq1kLGKwRzqmFE4H',
+  test_usd: 'price_1TkwM7Pgeq1kLGKwh63ElRm9',
+  test_eur: 'price_1TkwM7Pgeq1kLGKwL7cZcNbn',
+  business_jpy: 'price_1TkgJcPgeq1kLGKw9lRAwT8b',
+  business_usd: 'price_1TkgJcPgeq1kLGKwIDTaJW26',
+  business_eur: 'price_1TkgJcPgeq1kLGKwQVVTvk51',
+} as const;
+
+const EURO_COUNTRIES = new Set([
+  'AT', 'BE', 'HR', 'CY', 'EE', 'FI', 'FR', 'DE', 'GR', 'IE', 'IT', 'LV', 'LT', 'LU', 'MT', 'NL', 'PT', 'SK', 'SI', 'ES',
+]);
+
+const PLAN_PRICES: Record<PlanId, Record<CurrencyCode, number>> = {
+  test: { usd: 2.99, jpy: 450, eur: 2.99 },
+  business: { usd: 9.99, jpy: 1500, eur: 9.99 },
+};
+
+const PLAN_CREDITS: Record<PlanId, number> = {
+  test: 2,
+  business: 10,
+};
+
+const COPY = {
+  en: {
+    loadingAuth: 'Loading authentication…',
+    signedIn: 'Signed in successfully.',
+    signUpRequested: 'Sign-up requested. Check your email if confirmation is enabled.',
+    signInRequiredPurchase: 'Please sign in before purchasing.',
+    signInRequiredAnalyze: 'Please sign in before analyzing patent text.',
+    emptyText: 'Enter English or Japanese patent text to analyze.',
+    noResult: 'Analyze request completed without returning a result.',
+    authEyebrow: 'Patent AI Analysis',
+    authTitle: 'Sign in to classify patent keywords',
+    authIntro: 'Authenticate with Supabase before sending text to the secure Edge Function. The OpenAI API key stays server-side.',
+    email: 'Email',
+    password: 'Password',
+    working: 'Working…',
+    signIn: 'Sign in',
+    createAccount: 'Create account',
+    needAccount: 'Need an account? Sign up',
+    haveAccount: 'Already have an account? Sign in',
+    eyebrow: 'English / Japanese Patent Intelligence',
+    title: 'Keyword Extraction & Classification Analysis',
+    intro: 'Extract normalized technical terms, rank frequencies, and map likely IPC, CPC, FI, and F-term codes using a Supabase Edge Function.',
+    signOut: 'Sign out',
+    planTitle: 'Choose the Right Plan for You',
+    planIntro: 'Buy analysis credits and start using the tool right away.',
+    testUse: 'Test Use',
+    businessUse: 'Business Use',
+    testDescription: 'Try the tool with 2 analyses. Perfect for a quick test.',
+    businessDescription: 'More analyses for your business needs. Great for regular work.',
+    analysisCredits: 'Analysis Credits',
+    validFor: 'Valid for',
+    days30: '30 days',
+    days180: '180 days',
+    oneTimePayment: 'One-time payment',
+    buy: 'Buy',
+    forTestUse: 'For Test Use',
+    forBusinessUse: 'For Business Use',
+    selectedCredits: 'Credits selected',
+    openingCheckout: 'Opening checkout…',
+    patentText: 'Patent text',
+    characters: 'characters',
+    placeholder: 'Paste English or Japanese patent claims, abstracts, or descriptions…',
+    estimatedEmpty: 'Estimated result time: enter patent text to calculate.',
+    estimatedFor: 'Estimated result time for',
+    analyze: 'Analyze',
+    analyzing: 'Analyzing…',
+    clear: 'Clear',
+    secureAnalyze: 'Analyzing text securely through Supabase Edge Functions…',
+    results: 'Results',
+    detectedLanguage: 'Detected language:',
+    preparingPdf: 'Preparing PDF…',
+    downloadPdf: 'Download PDF',
+    columns: ['Term', 'Normalized Term', 'Count', 'Rank', 'IPC', 'CPC', 'FI', 'F-term', 'Confidence', 'Reason'],
+  },
+  ja: {
+    loadingAuth: '認証情報を読み込み中…',
+    signedIn: 'サインインしました。',
+    signUpRequested: 'アカウント作成を受け付けました。確認メールが有効な場合はメールをご確認ください。',
+    signInRequiredPurchase: '購入する前にサインインしてください。',
+    signInRequiredAnalyze: '特許テキストを解析する前にサインインしてください。',
+    emptyText: '解析する英語または日本語の特許テキストを入力してください。',
+    noResult: '解析リクエストは完了しましたが、結果が返されませんでした。',
+    authEyebrow: '特許AI解析',
+    authTitle: 'サインインして特許キーワードを分類',
+    authIntro: '安全なEdge Functionへテキストを送信する前にSupabaseで認証します。OpenAI APIキーはサーバー側で保護されます。',
+    email: 'メールアドレス',
+    password: 'パスワード',
+    working: '処理中…',
+    signIn: 'サインイン',
+    createAccount: 'アカウント作成',
+    needAccount: 'アカウントが必要ですか？登録',
+    haveAccount: 'アカウントをお持ちですか？サインイン',
+    eyebrow: '英語 / 日本語 特許インテリジェンス',
+    title: 'キーワード抽出・分類解析',
+    intro: '正規化した技術用語を抽出し、頻度をランク付けして、関連するIPC、CPC、FI、FタームをSupabase Edge Functionで推定します。',
+    signOut: 'サインアウト',
+    planTitle: '最適なプランを選択',
+    planIntro: '解析クレジットを購入して、すぐにツールを利用できます。',
+    testUse: 'テスト利用',
+    businessUse: 'ビジネス利用',
+    testDescription: '2回分の解析でツールを試せます。短時間の確認に最適です。',
+    businessDescription: '業務に必要な解析回数をまとめて利用できます。継続的な作業に最適です。',
+    analysisCredits: '解析クレジット',
+    validFor: '有効期間',
+    days30: '30日',
+    days180: '180日',
+    oneTimePayment: '一回払い',
+    buy: '購入',
+    forTestUse: 'テスト利用向け',
+    forBusinessUse: 'ビジネス利用向け',
+    selectedCredits: 'クレジット選択済み',
+    openingCheckout: '決済ページを開いています…',
+    patentText: '特許テキスト',
+    characters: '文字',
+    placeholder: '英語または日本語の特許請求の範囲、要約、明細書を貼り付けてください…',
+    estimatedEmpty: '推定結果時間: 特許テキストを入力すると計算します。',
+    estimatedFor: '推定結果時間',
+    analyze: '解析',
+    analyzing: '解析中…',
+    clear: 'クリア',
+    secureAnalyze: 'Supabase Edge Functions経由で安全に解析中…',
+    results: '結果',
+    detectedLanguage: '検出言語:',
+    preparingPdf: 'PDFを準備中…',
+    downloadPdf: 'PDFをダウンロード',
+    columns: ['用語', '正規化用語', '回数', '順位', 'IPC', 'CPC', 'FI', 'Fターム', '信頼度', '理由'],
+  },
+} as const;
+
 function asErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'An unexpected error occurred.';
 }
 
-function formatEstimatedDuration(totalSeconds: number): string {
+function getBrowserLanguage(): AppLanguage {
+  return navigator.language.toLowerCase().startsWith('ja') ? 'ja' : 'en';
+}
+
+function getLocaleCountry(): string {
+  const locale = navigator.language || 'en-US';
+  const country = locale.split('-')[1]?.toUpperCase();
+  return country || 'US';
+}
+
+function getCurrencyForCountry(country: string): CurrencyCode {
+  if (country === 'JP') {
+    return 'jpy';
+  }
+
+  if (EURO_COUNTRIES.has(country)) {
+    return 'eur';
+  }
+
+  return 'usd';
+}
+
+function formatPrice(amount: number, currency: CurrencyCode, locale: string): string {
+  return new Intl.NumberFormat(locale, {
+    style: 'currency',
+    currency: currency.toUpperCase(),
+    maximumFractionDigits: currency === 'jpy' ? 0 : 2,
+  }).format(amount);
+}
+
+function formatEstimatedDuration(totalSeconds: number, language: AppLanguage): string {
   if (totalSeconds < 60) {
-    return `${totalSeconds} seconds`;
+    return language === 'ja' ? `${totalSeconds}秒` : `${totalSeconds} seconds`;
   }
 
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
 
+  if (language === 'ja') {
+    return seconds === 0 ? `${minutes}分` : `${minutes}分${seconds}秒`;
+  }
+
   return seconds === 0 ? `${minutes} minute${minutes === 1 ? '' : 's'}` : `${minutes} min ${seconds} sec`;
 }
 
-function estimateResultTime(characterCount: number): string {
+function estimateResultTime(characterCount: number, language: AppLanguage): string {
+  const t = COPY[language];
+
   if (characterCount === 0) {
-    return 'Estimated result time: enter patent text to calculate.';
+    return t.estimatedEmpty;
   }
 
   const inputBlocks = Math.ceil(characterCount / 500);
   const minimumSeconds = 20 + (inputBlocks * 8);
   const maximumSeconds = minimumSeconds + 20 + (Math.ceil(characterCount / 2000) * 10);
 
-  return `Estimated result time for ${characterCount.toLocaleString()} characters: ${formatEstimatedDuration(minimumSeconds)}–${formatEstimatedDuration(maximumSeconds)}.`;
-}
-const PRICE_IDS = {
-  test_jpy: "price_1TkwGxPgeq1kLGKwRzqmFE4H",
-  test_usd: "price_1TkwM7Pgeq1kLGKwh63ElRm9",
-  test_eur: "price_1TkwM7Pgeq1kLGKwL7cZcNbn",
+  if (language === 'ja') {
+    return `${t.estimatedFor}（${characterCount.toLocaleString()}文字）: ${formatEstimatedDuration(minimumSeconds, language)}〜${formatEstimatedDuration(maximumSeconds, language)}。`;
+  }
 
-  business_jpy: "price_1TkgJcPgeq1kLGKw9lRAwT8b",
-  business_usd: "price_1TkgJcPgeq1kLGKwIDTaJW26",
-  business_eur: "price_1TkgJcPgeq1kLGKwQVVTvk51",
-};
+  return `${t.estimatedFor} ${characterCount.toLocaleString()} characters: ${formatEstimatedDuration(minimumSeconds, language)}–${formatEstimatedDuration(maximumSeconds, language)}.`;
+}
+
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -50,6 +218,12 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [error, setError] = useState('');
+  const [clickedPlan, setClickedPlan] = useState<PlanId | null>(null);
+
+  const language = useMemo(getBrowserLanguage, []);
+  const locale = useMemo(() => navigator.language || (language === 'ja' ? 'ja-JP' : 'en-US'), [language]);
+  const currency = useMemo(() => getCurrencyForCountry(getLocaleCountry()), []);
+  const t = COPY[language];
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -74,8 +248,8 @@ export default function App() {
   );
 
   const estimatedResultTime = useMemo(
-    () => estimateResultTime(text.trim().length),
-    [text],
+    () => estimateResultTime(text.trim().length, language),
+    [language, text],
   );
 
   async function handleAuth(event: FormEvent<HTMLFormElement>) {
@@ -93,55 +267,56 @@ export default function App() {
         throw authError;
       }
 
-      setAuthMessage(
-        authMode === 'sign-in'
-          ? 'Signed in successfully.'
-          : 'Sign-up requested. Check your email if confirmation is enabled.',
-      );
+      setAuthMessage(authMode === 'sign-in' ? t.signedIn : t.signUpRequested);
     } catch (authError) {
       setError(asErrorMessage(authError));
     } finally {
       setAuthLoading(false);
     }
   }
-async function handleCheckout(priceId: string) {
-  if (!session) {
-    setError('Please sign in before purchasing.');
-    return;
-  }
 
-  setError('');
+  async function handleCheckout(plan: PlanId) {
+    if (!session) {
+      setError(t.signInRequiredPurchase);
+      return;
+    }
 
-  try {
-    const { data, error } = await supabase.functions.invoke(
-      'create-checkout-session',
-      {
-        body: {
-          priceId,
-          quantity: 1,
+    setError('');
+    setClickedPlan(plan);
+
+    try {
+      const priceId = PRICE_IDS[`${plan}_${currency}`];
+      const { data, error } = await supabase.functions.invoke(
+        'create-checkout-session',
+        {
+          body: {
+            priceId,
+            quantity: 1,
+          },
         },
+      );
+
+      if (error) {
+        throw error;
       }
-    );
 
-    if (error) {
-      throw error;
+      if (data?.url) {
+        window.location.href = data.url;
+      }
+    } catch (checkoutError) {
+      setClickedPlan(null);
+      setError(asErrorMessage(checkoutError));
     }
-
-    if (data?.url) {
-      window.location.href = data.url;
-    }
-  } catch (checkoutError) {
-    setError(asErrorMessage(checkoutError));
   }
-}
+
   async function handleAnalyze() {
     if (!session) {
-      setError('Please sign in before analyzing patent text.');
+      setError(t.signInRequiredAnalyze);
       return;
     }
 
     if (!text.trim()) {
-      setError('Enter English or Japanese patent text to analyze.');
+      setError(t.emptyText);
       return;
     }
 
@@ -150,7 +325,7 @@ async function handleCheckout(priceId: string) {
     setResult(null);
 
     try {
-      const { data, error: functionError } = await supabase.functions.invoke<AnalysisResult>("openai-proxy", {
+      const { data, error: functionError } = await supabase.functions.invoke<AnalysisResult>('openai-proxy', {
         body: { input: text },
       });
 
@@ -159,7 +334,7 @@ async function handleCheckout(priceId: string) {
       }
 
       if (!data) {
-        throw new Error('Analyze request completed without returning a result.');
+        throw new Error(t.noResult);
       }
 
       setResult(data);
@@ -193,36 +368,77 @@ async function handleCheckout(priceId: string) {
     setResult(null);
   }
 
+  function renderPlan(plan: PlanId) {
+    const credits = PLAN_CREDITS[plan];
+    const isTest = plan === 'test';
+    const isClicked = clickedPlan === plan;
+    const planLabel = isTest ? t.testUse : t.businessUse;
+    const duration = isTest ? t.days30 : t.days180;
+    const price = formatPrice(PLAN_PRICES[plan][currency], currency, locale);
+
+    return (
+      <article className={`plan-card ${isTest ? 'test-plan' : 'business-plan'}`}>
+        <div className="plan-top">
+          <div className="plan-icon" aria-hidden="true">{isTest ? '⚗' : '💼'}</div>
+          <div>
+            <h3>{credits} Analyses</h3>
+            <p>{planLabel}</p>
+          </div>
+        </div>
+        <div className="plan-body">
+          <p className="plan-description">{isTest ? t.testDescription : t.businessDescription}</p>
+          <ul className="plan-features">
+            <li><span>✓</span>{credits} {t.analysisCredits}</li>
+            <li><span>✓</span>{t.validFor} {duration}</li>
+          </ul>
+          <div className="plan-divider" />
+          <p className="plan-price">{price}</p>
+          <p className="plan-payment">{t.oneTimePayment}</p>
+          <button
+            className="plan-button"
+            type="button"
+            onClick={() => handleCheckout(plan)}
+            disabled={clickedPlan !== null}
+          >
+            <span aria-hidden="true">🛒</span>
+            <span>
+              {isClicked ? `${credits} ${t.selectedCredits}` : `${t.buy} ${credits} Analyses`}
+              <small>{isClicked ? t.openingCheckout : isTest ? t.forTestUse : t.forBusinessUse}</small>
+            </span>
+          </button>
+        </div>
+      </article>
+    );
+  }
+
   if (authLoading && !session) {
-    return <main className="shell"><p className="status-card">Loading authentication…</p></main>;
+    return <main className="shell"><p className="status-card">{t.loadingAuth}</p></main>;
   }
 
   if (!session) {
     return (
       <main className="shell auth-shell">
         <section className="card auth-card">
-          <p className="eyebrow">Patent AI Analysis</p>
-          <h1>Sign in to classify patent keywords</h1>
-          <p className="muted">
-            Authenticate with Supabase before sending text to the secure Edge Function. The OpenAI API key stays server-side.
-          </p>
+          <p className="eyebrow">{t.authEyebrow}</p>
+          <h1>{t.authTitle}</h1>
+          <p className="muted">{t.authIntro}</p>
 
           <form onSubmit={handleAuth} className="auth-form">
             <label>
-              Email
+              {t.email}
               <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
             </label>
             <label>
-              Password
+              {t.password}
               <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required minLength={6} />
             </label>
             <button className="primary" type="submit" disabled={authLoading}>
-              {authLoading ? 'Working…' : authMode === 'sign-in' ? 'Sign in' : 'Create account'}
+              {authLoading ? t.working : authMode === 'sign-in' ? t.signIn : t.createAccount}
             </button>
           </form>
 
           <button className="link-button" type="button" onClick={() => setAuthMode(authMode === 'sign-in' ? 'sign-up' : 'sign-in')}>
-            {authMode === 'sign-in' ? 'Need an account? Sign up' : 'Already have an account? Sign in'}
+            {authMode === 'sign-in' ? t.needAccount : t.haveAccount}
           </button>
           {authMessage && <p className="success">{authMessage}</p>}
           {error && <p className="error">{error}</p>}
@@ -235,106 +451,59 @@ async function handleCheckout(priceId: string) {
     <main className="shell">
       <header className="hero">
         <div>
-          <p className="eyebrow">English / Japanese Patent Intelligence</p>
-          <h1>Keyword Extraction & Classification Analysis</h1>
-          <p className="muted">
-            Extract normalized technical terms, rank frequencies, and map likely IPC, CPC, FI, and F-term codes using a Supabase Edge Function.
-          </p>
+          <p className="eyebrow">{t.eyebrow}</p>
+          <h1>{t.title}</h1>
+          <p className="muted">{t.intro}</p>
         </div>
         <div className="user-panel">
           <span>{session.user.email}</span>
-          <button type="button" className="secondary" onClick={handleSignOut}>Sign out</button>
+          <button type="button" className="secondary" onClick={handleSignOut}>{t.signOut}</button>
         </div>
       </header>
-<section className="card">
-  <div className="section-heading">
-    <h2>Purchase Analysis Packs</h2>
-  </div>
 
-  <div className="actions">
-    <button
-      className="primary"
-      type="button"
-      onClick={() => handleCheckout(PRICE_IDS.test_jpy)}
-    >
-      Test Pack ¥
-    </button>
+      <section className="plans-section" aria-labelledby="plans-title">
+        <div className="plans-heading">
+          <h2 id="plans-title">{t.planTitle}</h2>
+          <p>{t.planIntro}</p>
+        </div>
+        <div className="plans-grid">
+          {renderPlan('test')}
+          {renderPlan('business')}
+        </div>
+      </section>
 
-    <button
-      className="secondary"
-      type="button"
-      onClick={() => handleCheckout(PRICE_IDS.test_usd)}
-    >
-      Test Pack $
-    </button>
-
-    <button
-      className="secondary"
-      type="button"
-      onClick={() => handleCheckout(PRICE_IDS.test_eur)}
-    >
-      Test Pack €
-    </button>
-  </div>
-
-  <div className="actions">
-    <button
-      className="primary"
-      type="button"
-      onClick={() => handleCheckout(PRICE_IDS.business_jpy)}
-    >
-      Business Pack ¥
-    </button>
-
-    <button
-      className="secondary"
-      type="button"
-      onClick={() => handleCheckout(PRICE_IDS.business_usd)}
-    >
-      Business Pack $
-    </button>
-
-    <button
-      className="secondary"
-      type="button"
-      onClick={() => handleCheckout(PRICE_IDS.business_eur)}
-    >
-      Business Pack €
-    </button>
-  </div>
-</section>
       <section className="card input-card">
         <div className="section-heading">
-          <h2>Patent text</h2>
-          <span>{text.length.toLocaleString()} characters</span>
+          <h2>{t.patentText}</h2>
+          <span>{text.length.toLocaleString()} {t.characters}</span>
         </div>
         <textarea
           value={text}
           onChange={(event) => setText(event.target.value)}
-          placeholder="Paste English or Japanese patent claims, abstracts, or descriptions…"
+          placeholder={t.placeholder}
           spellCheck={false}
         />
         <p className="estimate">{estimatedResultTime}</p>
         <div className="actions">
           <button className="primary" type="button" onClick={handleAnalyze} disabled={loading}>
-            {loading ? 'Analyzing…' : 'Analyze'}
+            {loading ? t.analyzing : t.analyze}
           </button>
-          <button className="secondary" type="button" onClick={() => setText('')} disabled={loading}>Clear</button>
+          <button className="secondary" type="button" onClick={() => setText('')} disabled={loading}>{t.clear}</button>
         </div>
         {error && <p className="error">{error}</p>}
       </section>
 
-      {loading && <p className="status-card">Analyzing text securely through Supabase Edge Functions… {estimatedResultTime}</p>}
+      {loading && <p className="status-card">{t.secureAnalyze} {estimatedResultTime}</p>}
 
       {result && (
         <section className="card results-card">
           <div className="section-heading">
             <div>
-              <h2>Results</h2>
-              <p className="muted">Detected language: <strong>{result.language}</strong></p>
+              <h2>{t.results}</h2>
+              <p className="muted">{t.detectedLanguage} <strong>{result.language}</strong></p>
             </div>
             <button className="primary" type="button" onClick={handleDownloadPdf} disabled={!Array.isArray(result.keywords) || result.keywords.length === 0 || pdfLoading}>
-              {pdfLoading ? 'Preparing PDF…' : 'Download PDF'}
+              {pdfLoading ? t.preparingPdf : t.downloadPdf}
             </button>
           </div>
           {result.warning && <p className="warning">{result.warning}</p>}
@@ -342,16 +511,7 @@ async function handleCheckout(priceId: string) {
             <table>
               <thead>
                 <tr>
-                  <th>Term</th>
-                  <th>Normalized Term</th>
-                  <th>Count</th>
-                  <th>Rank</th>
-                  <th>IPC</th>
-                  <th>CPC</th>
-                  <th>FI</th>
-                  <th>F-term</th>
-                  <th>Confidence</th>
-                  <th>Reason</th>
+                  {t.columns.map((column) => <th key={column}>{column}</th>)}
                 </tr>
               </thead>
               <tbody>

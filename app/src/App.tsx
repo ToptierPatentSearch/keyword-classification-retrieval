@@ -29,7 +29,15 @@ function estimateResultTime(characterCount: number): string {
 
   return `Estimated result time for ${characterCount.toLocaleString()} characters: ${formatEstimatedDuration(minimumSeconds)}–${formatEstimatedDuration(maximumSeconds)}.`;
 }
+const PRICE_IDS = {
+  test_jpy: "price_1TkwGxPgeq1kLGKwRzqmFE4H",
+  test_usd: "price_1TkwM7Pgeq1kLGKwh63ElRm9",
+  test_eur: "price_1TkwM7Pgeq1kLGKwL7cZcNbn",
 
+  business_jpy: "price_1TkgJcPgeq1kLGKw9lRAwT8b",
+  business_usd: "price_1TkgJcPgeq1kLGKwIDTaJW26",
+  business_eur: "price_1TkgJcPgeq1kLGKwQVVTvk51",
+};
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
@@ -96,7 +104,36 @@ export default function App() {
       setAuthLoading(false);
     }
   }
+async function handleCheckout(priceId: string) {
+  if (!session) {
+    setError('Please sign in before purchasing.');
+    return;
+  }
 
+  setError('');
+
+  try {
+    const { data, error } = await supabase.functions.invoke(
+      'create-checkout-session',
+      {
+        body: {
+          priceId,
+          quantity: 1,
+        },
+      }
+    );
+
+    if (error) {
+      throw error;
+    }
+
+    if (data?.url) {
+      window.location.href = data.url;
+    }
+  } catch (checkoutError) {
+    setError(asErrorMessage(checkoutError));
+  }
+}
   async function handleAnalyze() {
     if (!session) {
       setError('Please sign in before analyzing patent text.');
@@ -209,7 +246,63 @@ export default function App() {
           <button type="button" className="secondary" onClick={handleSignOut}>Sign out</button>
         </div>
       </header>
+<section className="card">
+  <div className="section-heading">
+    <h2>Purchase Analysis Packs</h2>
+  </div>
 
+  <div className="actions">
+    <button
+      className="primary"
+      type="button"
+      onClick={() => handleCheckout(PRICE_IDS.test_jpy)}
+    >
+      Test Pack ¥
+    </button>
+
+    <button
+      className="secondary"
+      type="button"
+      onClick={() => handleCheckout(PRICE_IDS.test_usd)}
+    >
+      Test Pack $
+    </button>
+
+    <button
+      className="secondary"
+      type="button"
+      onClick={() => handleCheckout(PRICE_IDS.test_eur)}
+    >
+      Test Pack €
+    </button>
+  </div>
+
+  <div className="actions">
+    <button
+      className="primary"
+      type="button"
+      onClick={() => handleCheckout(PRICE_IDS.business_jpy)}
+    >
+      Business Pack ¥
+    </button>
+
+    <button
+      className="secondary"
+      type="button"
+      onClick={() => handleCheckout(PRICE_IDS.business_usd)}
+    >
+      Business Pack $
+    </button>
+
+    <button
+      className="secondary"
+      type="button"
+      onClick={() => handleCheckout(PRICE_IDS.business_eur)}
+    >
+      Business Pack €
+    </button>
+  </div>
+</section>
       <section className="card input-card">
         <div className="section-heading">
           <h2>Patent text</h2>

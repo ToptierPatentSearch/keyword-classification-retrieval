@@ -1,15 +1,21 @@
 import Stripe from 'npm:stripe@^18.0.0';
 import { createClient } from 'npm:@supabase/supabase-js@^2.75.0';
 
-type CheckoutMode = 'payment' | 'subscription';
+type PlanId = 'test' | 'business';
+type Currency = 'usd' | 'jpy' | 'eur';
 
 interface CheckoutRequest {
-  priceId?: unknown;
-  quantity?: unknown;
-  successUrl?: unknown;
-  cancelUrl?: unknown;
-  metadata?: unknown;
+  planId?: unknown;
+  credits?: unknown;
+  currency?: unknown;
 }
+
+const PLAN_CREDITS: Record<PlanId, number> = { test: 2, business: 10 };
+const PRICE_ENV: Record<PlanId, Record<Currency, string>> = {
+  // Stripe Price ID mapping: values are read from secrets so no fake Price IDs are trusted or committed.
+  test: { usd: 'STRIPE_PRICE_TEST_USD', jpy: 'STRIPE_PRICE_TEST_JPY', eur: 'STRIPE_PRICE_TEST_EUR' },
+  business: { usd: 'STRIPE_PRICE_BUSINESS_USD', jpy: 'STRIPE_PRICE_BUSINESS_JPY', eur: 'STRIPE_PRICE_BUSINESS_EUR' },
+};
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -18,104 +24,62 @@ const corsHeaders = {
   'Access-Control-Max-Age': '86400',
 };
 
-const checkoutMode = (Deno.env.get('STRIPE_CHECKOUT_MODE') ?? 'subscription') as CheckoutMode;
-const defaultQuantity = Number.parseInt(Deno.env.get('STRIPE_CHECKOUT_QUANTITY') ?? '1', 10);
-const allowPromotionCodes = (Deno.env.get('STRIPE_ALLOW_PROMOTION_CODES') ?? 'true') === 'true';
-const trialPeriodDays = Number.parseInt(Deno.env.get('STRIPE_TRIAL_PERIOD_DAYS') ?? '0', 10);
-
 function jsonResponse(body: unknown, init: ResponseInit = {}) {
   return new Response(JSON.stringify(body), {
     ...init,
-    headers: {
-      ...corsHeaders,
-      'Content-Type': 'application/json; charset=utf-8',
-      ...(init.headers ?? {}),
-    },
+    headers: { ...corsHeaders, 'Content-Type': 'application/json; charset=utf-8', ...(init.headers ?? {}) },
   });
 }
 
 function getRequiredEnv(name: string): string {
   const value = Deno.env.get(name);
-  if (!value) {
-    throw new Error(`${name} is not configured in Supabase secrets.`);
-  }
-
+  if (!value) throw new Error(`${name} is not configured in Supabase secrets.`);
   return value;
 }
 
-function getString(value: unknown, fallback: string | undefined): string | undefined {
-  return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+function getPlan(value: unknown): PlanId {
+  if (value === 'test' || value === 'business') return value;
+  throw new Error('planId must be "test" or "business".');
 }
 
-function getQuantity(value: unknown): number {
-  const quantity = typeof value === 'number' ? value : defaultQuantity;
-  if (!Number.isInteger(quantity) || quantity < 1 || quantity > 99) {
-    throw new Error('quantity must be an integer between 1 and 99.');
-  }
-
-  return quantity;
-}
-
-function getMetadata(value: unknown): Record<string, string> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return {};
-  }
-
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>)
-      .filter(([, entryValue]) => ['string', 'number', 'boolean'].includes(typeof entryValue))
-      .map(([key, entryValue]) => [key, String(entryValue)]),
-  );
+function getCurrency(value: unknown): Currency {
+  if (value === 'usd' || value === 'jpy' || value === 'eur') return value;
+  throw new Error('currency must be "usd", "jpy", or "eur".');
 }
 
 Deno.serve(async (request) => {
-  if (request.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
-  }
-
-  if (request.method !== 'POST') {
-    return jsonResponse({ error: 'Method not allowed. Use POST.' }, { status: 405 });
-  }
+  if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
+  if (request.method !== 'POST') return jsonResponse({ error: 'Method not allowed. Use POST.' }, { status: 405 });
 
   try {
-    if (checkoutMode !== 'payment' && checkoutMode !== 'subscription') {
-      throw new Error('STRIPE_CHECKOUT_MODE must be either payment or subscription.');
-    }
-
     const supabaseUrl = getRequiredEnv('SUPABASE_URL');
     const supabaseAnonKey = getRequiredEnv('SUPABASE_ANON_KEY');
     const supabaseServiceRoleKey = getRequiredEnv('SUPABASE_SERVICE_ROLE_KEY');
     const stripeSecretKey = getRequiredEnv('STRIPE_SECRET_KEY');
-    const defaultPriceId = getRequiredEnv('STRIPE_PRICE_ID');
     const defaultSuccessUrl = getRequiredEnv('STRIPE_CHECKOUT_SUCCESS_URL');
     const defaultCancelUrl = getRequiredEnv('STRIPE_CHECKOUT_CANCEL_URL');
 
     const authHeader = request.headers.get('Authorization');
-    if (!authHeader) {
-      return jsonResponse({ error: 'Missing Authorization header.' }, { status: 401 });
-    }
+    if (!authHeader) return jsonResponse({ error: 'Missing Authorization header.' }, { status: 401 });
 
     const body = await request.json().catch(() => ({})) as CheckoutRequest;
+    const planId = getPlan(body.planId);
+    const currency = getCurrency(body.currency);
+    const expectedCredits = PLAN_CREDITS[planId];
+    if (body.credits !== expectedCredits) throw new Error(`credits must be ${expectedCredits} for the ${planId} plan.`);
+
+    const priceId = getRequiredEnv(PRICE_ENV[planId][currency]);
+
     const supabase = createClient(supabaseUrl, supabaseAnonKey, {
       global: { headers: { Authorization: authHeader } },
       auth: { persistSession: false },
     });
-    const admin = createClient(supabaseUrl, supabaseServiceRoleKey, {
-      auth: { persistSession: false },
-    });
+    const admin = createClient(supabaseUrl, supabaseServiceRoleKey, { auth: { persistSession: false } });
 
     const { data: { user }, error: userError } = await supabase.auth.getUser();
-    if (userError || !user) {
-      return jsonResponse({ error: 'Invalid or expired Supabase session.' }, { status: 401 });
-    }
+    if (userError || !user) return jsonResponse({ error: 'Invalid or expired Supabase session.' }, { status: 401 });
 
     const stripe = new Stripe(stripeSecretKey);
-    const priceId = getString(body.priceId, defaultPriceId) as string;
-    const quantity = getQuantity(body.quantity);
-    const successUrl = getString(body.successUrl, defaultSuccessUrl) as string;
-    const cancelUrl = getString(body.cancelUrl, defaultCancelUrl) as string;
-    const requestMetadata = getMetadata(body.metadata);
-
     const { data: customerRow } = await admin
       .from('stripe_customers')
       .select('stripe_customer_id')
@@ -124,60 +88,37 @@ Deno.serve(async (request) => {
 
     let customerId = customerRow?.stripe_customer_id as string | undefined;
     if (!customerId) {
-      const customer = await stripe.customers.create({
-        email: user.email ?? undefined,
-        metadata: { supabase_user_id: user.id },
-      });
+      const customer = await stripe.customers.create({ email: user.email ?? undefined, metadata: { supabase_user_id: user.id } });
       customerId = customer.id;
-
-      await admin.from('stripe_customers').insert({
-        user_id: user.id,
-        stripe_customer_id: customerId,
-        email: user.email,
-      });
+      await admin.from('stripe_customers').insert({ user_id: user.id, stripe_customer_id: customerId, email: user.email });
     }
 
-    const metadata = {
-      ...requestMetadata,
-      supabase_user_id: user.id,
-      checkout_mode: checkoutMode,
-      price_id: priceId,
-    };
+    const successUrl = `${defaultSuccessUrl}${defaultSuccessUrl.includes('?') ? '&' : '?'}checkout=success&purchasedPlan=${planId}`;
+    const metadata = { supabase_user_id: user.id, plan_id: planId, credits: String(expectedCredits), currency, price_id: priceId };
 
     const session = await stripe.checkout.sessions.create({
-      mode: checkoutMode,
+      mode: 'payment',
       customer: customerId,
-      line_items: [{ price: priceId, quantity }],
+      line_items: [{ price: priceId, quantity: 1 }],
       success_url: successUrl,
-      cancel_url: cancelUrl,
-      allow_promotion_codes: allowPromotionCodes,
+      cancel_url: defaultCancelUrl,
       client_reference_id: user.id,
       metadata,
-      ...(checkoutMode === 'subscription'
-        ? {
-            subscription_data: {
-              metadata,
-              ...(trialPeriodDays > 0 ? { trial_period_days: trialPeriodDays } : {}),
-            },
-          }
-        : {
-            payment_intent_data: { metadata },
-          }),
+      payment_intent_data: { metadata },
     });
 
     await admin.from('stripe_checkout_sessions').insert({
       user_id: user.id,
       stripe_customer_id: customerId,
       stripe_checkout_session_id: session.id,
-      mode: checkoutMode,
+      mode: 'payment',
       price_id: priceId,
-      quantity,
+      quantity: 1,
       status: session.status,
       payment_status: session.payment_status,
       success_url: successUrl,
-      cancel_url: cancelUrl,
-      allow_promotion_codes: allowPromotionCodes,
-      trial_period_days: checkoutMode === 'subscription' && trialPeriodDays > 0 ? trialPeriodDays : null,
+      cancel_url: defaultCancelUrl,
+      allow_promotion_codes: false,
       metadata,
     });
 

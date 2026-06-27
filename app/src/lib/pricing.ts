@@ -9,21 +9,67 @@ export interface PricingPlan {
   theme: 'blue' | 'green';
 }
 
+export interface LocalizedPlanPrice {
+  label: string;
+  amount: number;
+  stripePriceId: string;
+}
+
+export interface LocalizedPricing {
+  locale: SupportedCurrency;
+  currency: string;
+  symbol: string;
+  plans: Record<PlanId, LocalizedPlanPrice>;
+}
+
 export const PRICING_PLANS: PricingPlan[] = [
   { id: 'test', credits: 2, validityDays: 30, theme: 'blue' },
   { id: 'business', credits: 10, validityDays: 180, theme: 'green' },
 ];
 
-export const PRICE_DISPLAY: Record<PlanId, Record<SupportedCurrency, number>> = {
-  test: { usd: 5, jpy: 500, eur: 5 },
-  business: { usd: 10, jpy: 1000, eur: 10 },
+const stripePriceId = (key: string): string => import.meta.env[key] as string | undefined ?? '';
+
+export const LOCALIZED_PRICING: Record<SupportedCurrency, LocalizedPricing> = {
+  usd: {
+    locale: 'usd',
+    currency: 'USD',
+    symbol: '$',
+    plans: {
+      test: { label: 'Test Pack', amount: 5, stripePriceId: stripePriceId('VITE_STRIPE_PRICE_TEST_USD') },
+      business: { label: 'Business Pack', amount: 10, stripePriceId: stripePriceId('VITE_STRIPE_PRICE_BUSINESS_USD') },
+    },
+  },
+  jpy: {
+    locale: 'jpy',
+    currency: 'JPY',
+    symbol: '¥',
+    plans: {
+      test: { label: 'テストパック', amount: 500, stripePriceId: stripePriceId('VITE_STRIPE_PRICE_TEST_JPY') },
+      business: { label: 'ビジネスパック', amount: 1500, stripePriceId: stripePriceId('VITE_STRIPE_PRICE_BUSINESS_JPY') },
+    },
+  },
+  eur: {
+    locale: 'eur',
+    currency: 'EUR',
+    symbol: '€',
+    plans: {
+      test: { label: 'Test Pack', amount: 5, stripePriceId: stripePriceId('VITE_STRIPE_PRICE_TEST_EUR') },
+      business: { label: 'Business Pack', amount: 10, stripePriceId: stripePriceId('VITE_STRIPE_PRICE_BUSINESS_EUR') },
+    },
+  },
 };
 
+export function getLocalizedPricing(currency: SupportedCurrency): LocalizedPricing {
+  return LOCALIZED_PRICING[currency];
+}
+
 export function formatPlanPrice(planId: PlanId, currency: SupportedCurrency, locale: string): string {
+  const pricing = getLocalizedPricing(currency);
+
   return new Intl.NumberFormat(locale, {
     style: 'currency',
-    currency: currency.toUpperCase(),
+    currency: pricing.currency,
     currencyDisplay: 'narrowSymbol',
     maximumFractionDigits: currency === 'jpy' ? 0 : 2,
-  }).format(PRICE_DISPLAY[planId][currency]);
+  }).format(pricing.plans[planId].amount);
 }

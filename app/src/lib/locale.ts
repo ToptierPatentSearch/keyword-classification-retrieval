@@ -57,7 +57,9 @@ export const messages = {
     loading: (credits: number) => `Preparing checkout for ${credits} credits...`,
     signInError: 'Please sign in before purchasing.',
     checkoutError: 'Unable to start checkout. Please try again.',
-    remaining: (credits: number) => `Remaining credits: ${credits}`,
+    currentPlan: 'Current Plan',
+    remaining: (credits: number) => `Remaining Credits: ${credits}`,
+    planStatusLoading: 'Loading your current credit balance...',
   },
   ja: {
     heading: 'あなたに合ったプランを選択',
@@ -75,6 +77,8 @@ export const messages = {
     loading: (credits: number) => `${credits}回分の決済を準備中...`,
     signInError: '購入するにはサインインしてください。',
     checkoutError: '決済を開始できませんでした。もう一度お試しください。',
+    currentPlan: '現在のプラン',
     remaining: (credits: number) => `残りクレジット: ${credits}`,
+    planStatusLoading: '現在のクレジット残高を読み込んでいます...',
   },
 } as const;

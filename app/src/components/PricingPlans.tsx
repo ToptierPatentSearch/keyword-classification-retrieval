@@ -25,8 +25,8 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
   const t = messages[language];
   const [loadingPlan, setLoadingPlan] = useState<PlanId | null>(null);
   const [remainingCredits, setRemainingCredits] = useState<number | null>(null);
-  const [returnedPlan, setReturnedPlan] = useState<PlanId | null>(null);
-  const [currentPlan, setCurrentPlan] = useState<PlanId | null>(null);
+  const [latestReliablePlan, setLatestReliablePlan] = useState<PlanId | null>(null);
+  const [latestPositiveCreditTransaction, setLatestPositiveCreditTransaction] = useState<{ plan_id: string | null; credits: number | null; created_at: string | null } | null>(null);
   const [balanceLoading, setBalanceLoading] = useState(false);
 
   async function fetchRemainingCredits() {
@@ -52,26 +52,35 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
 
     const credits = Number(data?.remaining_credits ?? 0);
 
+    let latestTransaction: { plan_id: string | null; credits: number | null; created_at: string | null } | null = null;
+
     if (credits <= 0) {
-      setCurrentPlan(null);
+      setLatestReliablePlan(null);
+      setLatestPositiveCreditTransaction(null);
     }
 
     if (credits > 0) {
       const { data: transaction } = await supabase
         .from('credit_transactions')
-        .select('plan_id')
+        .select('plan_id, credits, created_at')
         .eq('user_id', session.user.id)
         .gt('credits', 0)
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
 
+      latestTransaction = transaction ?? null;
+      setLatestPositiveCreditTransaction(latestTransaction);
+
       if (transaction?.plan_id === 'test' || transaction?.plan_id === 'business') {
-        setCurrentPlan(transaction.plan_id);
+        setLatestReliablePlan(transaction.plan_id);
+      } else {
+        setLatestReliablePlan(null);
       }
     }
 
     console.log('remainingCredits =', credits);
+    console.log('latest positive credit transaction =', latestTransaction);
     setRemainingCredits(credits);
     setBalanceLoading(false);
   }
@@ -83,12 +92,9 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const plan = params.get('purchasedPlan') as PlanId | null;
-    const fallbackPlan = window.localStorage.getItem('lastCheckoutPlan') as PlanId | null;
-    const nextPlan = plan === 'test' || plan === 'business' ? plan : fallbackPlan;
+    const plan = params.get('purchasedPlan');
 
-    if (nextPlan === 'test' || nextPlan === 'business') {
-      setReturnedPlan(nextPlan);
+    if (plan === 'test' || plan === 'business') {
       void fetchRemainingCredits();
       window.localStorage.removeItem('lastCheckoutPlan');
     }
@@ -130,8 +136,22 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
 
 
   const hasCredits = remainingCredits !== null && remainingCredits > 0;
-  const statusPlanId = currentPlan ?? returnedPlan ?? (remainingCredits !== null && remainingCredits > 2 ? 'business' : 'test');
-  const statusPlanName = localizedPricing.plans[statusPlanId].label;
+  const canDisplayTestPack = remainingCredits === 1 || remainingCredits === 2;
+  const statusPlanId = latestReliablePlan === 'business' || (latestReliablePlan === 'test' && canDisplayTestPack)
+    ? latestReliablePlan
+    : null;
+  const statusPlanName = statusPlanId === 'business'
+    ? t.currentBusinessPlanLabel
+    : statusPlanId === 'test'
+      ? t.currentTestPlanLabel
+      : t.neutralPlanLabel;
+  const statusPlanSource = statusPlanId ? 'reliable transaction data' : 'neutral fallback';
+
+  console.log('remainingCredits =', remainingCredits);
+  console.log('latest positive credit transaction =', latestPositiveCreditTransaction);
+  console.log('plan_id =', latestReliablePlan);
+  console.log('resolved plan label =', statusPlanName);
+  console.log('plan label source =', statusPlanSource);
 
   if (balanceLoading || remainingCredits === null) {
     return (

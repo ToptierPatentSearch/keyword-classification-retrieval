@@ -58,7 +58,10 @@ export const messages = {
     signInError: 'Please sign in before purchasing.',
     checkoutError: 'Unable to start checkout. Please try again.',
     currentPlan: 'Current Plan',
-    remaining: (credits: number) => `Remaining Credits: ${credits}`,
+    neutralPlanLabel: 'Available Analyses',
+    currentTestPlanLabel: 'Test Pack',
+    currentBusinessPlanLabel: 'Business Pack',
+    remaining: (credits: number) => `Remaining analyses: ${credits}`,
     planStatusLoading: 'Loading your current credit balance...',
   },
   ja: {
@@ -78,7 +81,10 @@ export const messages = {
     signInError: '購入するにはサインインしてください。',
     checkoutError: '決済を開始できませんでした。もう一度お試しください。',
     currentPlan: '現在のプラン',
-    remaining: (credits: number) => `残りクレジット: ${credits}`,
+    neutralPlanLabel: '利用可能な分析回数',
+    currentTestPlanLabel: 'テスト利用',
+    currentBusinessPlanLabel: 'ビジネス利用',
+    remaining: (credits: number) => `残り分析回数: ${credits}回`,
     planStatusLoading: '現在のクレジット残高を読み込んでいます...',
   },
 } as const;

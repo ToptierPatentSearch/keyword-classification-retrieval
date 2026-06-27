@@ -25,12 +25,14 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
   const t = messages[language];
   const [loadingPlan, setLoadingPlan] = useState<PlanId | null>(null);
   const [remainingCredits, setRemainingCredits] = useState<number | null>(null);
-  const [returnedPlan, setReturnedPlan] = useState<PlanId | null>(null);
   const [currentPlan, setCurrentPlan] = useState<PlanId | null>(null);
+  const [latestCreditTransaction, setLatestCreditTransaction] = useState<{ plan_id: string | null; credits: number; created_at: string } | null>(null);
   const [balanceLoading, setBalanceLoading] = useState(false);
 
   async function fetchRemainingCredits() {
     if (!session) {
+      setCurrentPlan(null);
+      setLatestCreditTransaction(null);
       setRemainingCredits(0);
       return;
     }
@@ -54,20 +56,32 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
 
     if (credits <= 0) {
       setCurrentPlan(null);
+      setLatestCreditTransaction(null);
     }
 
     if (credits > 0) {
-      const { data: transaction } = await supabase
+      const { data: transaction, error: transactionError } = await supabase
         .from('credit_transactions')
-        .select('plan_id')
+        .select('plan_id, credits, created_at')
         .eq('user_id', session.user.id)
         .gt('credits', 0)
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
 
-      if (transaction?.plan_id === 'test' || transaction?.plan_id === 'business') {
-        setCurrentPlan(transaction.plan_id);
+      if (transactionError) {
+        console.error('Unable to fetch latest credit transaction', transactionError);
+        setLatestCreditTransaction(null);
+        setCurrentPlan(null);
+      } else {
+        setLatestCreditTransaction(transaction ?? null);
+        if (transaction?.plan_id === 'business' && transaction.credits === 10) {
+          setCurrentPlan(transaction.plan_id);
+        } else if (transaction?.plan_id === 'test' && transaction.credits === 2 && credits <= 2) {
+          setCurrentPlan(transaction.plan_id);
+        } else {
+          setCurrentPlan(null);
+        }
       }
     }
 
@@ -88,7 +102,6 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
     const nextPlan = plan === 'test' || plan === 'business' ? plan : fallbackPlan;
 
     if (nextPlan === 'test' || nextPlan === 'business') {
-      setReturnedPlan(nextPlan);
       void fetchRemainingCredits();
       window.localStorage.removeItem('lastCheckoutPlan');
     }
@@ -130,8 +143,15 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
 
 
   const hasCredits = remainingCredits !== null && remainingCredits > 0;
-  const statusPlanId = currentPlan ?? returnedPlan ?? (remainingCredits !== null && remainingCredits > 2 ? 'business' : 'test');
-  const statusPlanName = localizedPricing.plans[statusPlanId].label;
+  const displayedPlanLabel = currentPlan === 'business' ? t.businessPack : currentPlan === 'test' ? t.testPack : t.availableCredits;
+  const showReliablePlanDetails = currentPlan !== null;
+
+  console.log('current plan display debug', {
+    remainingCredits,
+    latestCreditTransaction,
+    detectedPlanId: latestCreditTransaction?.plan_id ?? null,
+    displayedPlanLabel,
+  });
 
   if (balanceLoading || remainingCredits === null) {
     return (
@@ -148,8 +168,9 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
     return (
       <section className="pricing-section" aria-labelledby="pricing-heading">
         <article className="current-plan-card">
-          <p className="current-plan-label">{t.currentPlan}</p>
-          <h3>{statusPlanName}</h3>
+          {showReliablePlanDetails ? <p className="current-plan-label">{t.currentPlan}</p> : null}
+          <h3>{displayedPlanLabel}</h3>
+          {currentPlan === 'business' ? <p className="current-plan-detail">{t.plan10}</p> : null}
           <p className="remaining-credits">{t.remaining(remainingCredits)}</p>
         </article>
       </section>

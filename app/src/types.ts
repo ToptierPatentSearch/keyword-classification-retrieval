@@ -18,4 +18,5 @@ export interface AnalysisResult {
   language: PatentLanguage;
   keywords: KeywordClassification[];
   warning?: string;
+  remainingCredits?: number;
 }

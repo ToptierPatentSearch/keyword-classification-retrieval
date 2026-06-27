@@ -7,6 +7,7 @@ import { formatPlanPrice, getLocalizedPricing, PRICING_PLANS, type PlanId } from
 interface PricingPlansProps {
   session: Session | null;
   onError: (message: string) => void;
+  refreshKey?: number;
 }
 
 function asErrorMessage(error: unknown): string {
@@ -17,7 +18,7 @@ function iconForPlan(planId: PlanId) {
   return planId === 'test' ? '⚗️' : '💼';
 }
 
-export function PricingPlans({ session, onError }: PricingPlansProps) {
+export function PricingPlans({ session, onError, refreshKey = 0 }: PricingPlansProps) {
   const browserLocale = typeof navigator === 'undefined' ? 'en-US' : navigator.languages?.[0] || navigator.language || 'en-US';
   const language = useMemo(() => detectLanguage(), []);
   const currency = useMemo<SupportedCurrency>(() => detectCurrency(), []);
@@ -39,7 +40,7 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
 
     const { data, error } = await supabase
       .from('user_credit_balances')
-      .select('remaining_credits')
+      .select('"remaining credits"')
       .eq('user_id', session.user.id)
       .maybeSingle();
 
@@ -50,7 +51,7 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
       return;
     }
 
-    const credits = Number(data?.remaining_credits ?? 0);
+    const credits = Number((data as { 'remaining credits'?: number } | null)?.['remaining credits'] ?? 0);
 
     if (credits <= 0) {
       setCurrentPlan(null);
@@ -79,7 +80,7 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
   useEffect(() => {
     void fetchRemainingCredits();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.user.id]);
+  }, [session?.user.id, refreshKey]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -129,7 +130,6 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
   }
 
 
-  const hasCredits = remainingCredits !== null && remainingCredits > 0;
   const statusPlanId = currentPlan ?? returnedPlan ?? (remainingCredits !== null && remainingCredits > 2 ? 'business' : 'test');
   const statusPlanName = localizedPricing.plans[statusPlanId].label;
 
@@ -144,23 +144,15 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
     );
   }
 
-  if (hasCredits) {
-    return (
-      <section className="pricing-section" aria-labelledby="pricing-heading">
-        <article className="current-plan-card">
-          <p className="current-plan-label">{t.currentPlan}</p>
-          <h3>{statusPlanName}</h3>
-          <p className="remaining-credits">{t.remaining(remainingCredits)}</p>
-        </article>
-      </section>
-    );
-  }
-
   return (
     <section className="pricing-section" aria-labelledby="pricing-heading">
       <div className="pricing-heading">
         <h2 id="pricing-heading">{t.heading}</h2>
         <p>{t.description}</p>
+        <p className="remaining-credits">{t.remaining(remainingCredits)}</p>
+        {remainingCredits > 0 && (
+          <p className="current-plan-label">{t.currentPlan}: {statusPlanName}</p>
+        )}
       </div>
 
       <div className="pricing-grid">

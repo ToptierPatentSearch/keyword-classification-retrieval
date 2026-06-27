@@ -19,6 +19,21 @@ function formatEstimatedDuration(totalSeconds: number): string {
   return seconds === 0 ? `${minutes} minute${minutes === 1 ? '' : 's'}` : `${minutes} min ${seconds} sec`;
 }
 
+
+async function getRemainingCredits(userId: string): Promise<number> {
+  const { data, error } = await supabase
+    .from('user_credit_balances')
+    .select('"remaining credits"')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return Number((data as { 'remaining credits'?: number } | null)?.['remaining credits'] ?? 0);
+}
+
 function estimateResultTime(characterCount: number): string {
   if (characterCount === 0) {
     return 'Estimated result time: enter patent text to calculate.';
@@ -42,6 +57,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [error, setError] = useState('');
+  const [creditRefreshKey, setCreditRefreshKey] = useState(0);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -112,8 +128,13 @@ export default function App() {
     setResult(null);
 
     try {
-      const { data, error: functionError } = await supabase.functions.invoke<AnalysisResult>("openai-proxy", {
-        body: { input: text },
+      const remainingCredits = await getRemainingCredits(session.user.id);
+      if (remainingCredits <= 0) {
+        throw new Error('You do not have enough credits. Please purchase a Test pack or Business pack.');
+      }
+
+      const { data, error: functionError } = await supabase.functions.invoke<AnalysisResult>('analyze', {
+        body: { text },
       });
 
       if (functionError) {
@@ -125,6 +146,7 @@ export default function App() {
       }
 
       setResult(data);
+      setCreditRefreshKey((key) => key + 1);
     } catch (analyzeError) {
       setError(asErrorMessage(analyzeError));
     } finally {
@@ -208,7 +230,7 @@ export default function App() {
           <button type="button" className="secondary" onClick={handleSignOut}>Sign out</button>
         </div>
       </header>
-      <PricingPlans session={session} onError={setError} />
+      <PricingPlans session={session} onError={setError} refreshKey={creditRefreshKey} />
       <section className="card input-card">
         <div className="section-heading">
           <h2>Patent text</h2>

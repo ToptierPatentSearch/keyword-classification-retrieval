@@ -24,12 +24,30 @@ end $$;
 
 create index if not exists credit_transactions_user_id_idx on public.credit_transactions(user_id);
 
-create or replace view public.user_credit_balances as
-select
-  user_id,
-  coalesce(sum(credits), 0)::integer as remaining_credits
+do $$
+begin
+  if exists (
+    select 1 from pg_class c
+    join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public'
+      and c.relname = 'user_credit_balances'
+      and c.relkind = 'v'
+  ) then
+    drop view public.user_credit_balances;
+  end if;
+end $$;
+
+create table if not exists public.user_credit_balances (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  "remaining credits" integer not null default 0 check ("remaining credits" >= 0),
+  updated_at timestamptz not null default now()
+);
+
+insert into public.user_credit_balances (user_id, "remaining credits")
+select user_id, greatest(coalesce(sum(credits), 0), 0)::integer
 from public.credit_transactions
-group by user_id;
+group by user_id
+on conflict (user_id) do nothing;
 
 create or replace function public.grant_analysis_credits(
   p_user_id uuid,
@@ -69,14 +87,53 @@ begin
     jsonb_build_object('source', 'checkout.session.completed')
   )
   on conflict (stripe_checkout_session_id) do nothing;
+
+  if found then
+    insert into public.user_credit_balances (user_id, "remaining credits")
+    values (p_user_id, p_credits)
+    on conflict (user_id) do update
+      set "remaining credits" = public.user_credit_balances."remaining credits" + excluded."remaining credits",
+          updated_at = now();
+  end if;
+end;
+$$;
+
+create or replace function public.consume_analysis_credit(p_user_id uuid)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_remaining integer;
+begin
+  update public.user_credit_balances
+  set "remaining credits" = "remaining credits" - 1,
+      updated_at = now()
+  where user_id = p_user_id
+    and "remaining credits" > 0
+  returning "remaining credits" into v_remaining;
+
+  if v_remaining is null then
+    raise exception 'You do not have enough credits. Please purchase a Test pack or Business pack.' using errcode = 'P0001';
+  end if;
+
+  insert into public.credit_transactions (user_id, credits, source, metadata)
+  values (p_user_id, -1, 'analysis', jsonb_build_object('source', 'successful_analysis'));
+
+  return v_remaining;
 end;
 $$;
 
 alter table public.credit_transactions enable row level security;
-alter view public.user_credit_balances set (security_invoker = true);
+alter table public.user_credit_balances enable row level security;
 
 create policy "Users can read their credit transactions"
   on public.credit_transactions for select
+  using (auth.uid() = user_id);
+
+create policy "Users can read their credit balance"
+  on public.user_credit_balances for select
   using (auth.uid() = user_id);
 
 grant select on public.user_credit_balances to authenticated;

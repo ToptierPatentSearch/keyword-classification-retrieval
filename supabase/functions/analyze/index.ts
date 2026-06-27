@@ -1,4 +1,5 @@
 import OpenAI from 'npm:openai@^5.0.0';
+import { createClient } from 'npm:@supabase/supabase-js@^2.75.0';
 
 type Confidence = 'high' | 'medium' | 'low';
 type PatentLanguage = 'en' | 'ja';
@@ -24,6 +25,7 @@ interface AnalysisResult {
   language: PatentLanguage;
   keywords: KeywordClassification[];
   warning?: string;
+  remainingCredits?: number;
 }
 
 const corsHeaders = {
@@ -36,6 +38,7 @@ const corsHeaders = {
 const MAX_INPUT_CHARS = 50000;
 const LONG_INPUT_WARNING_CHARS = 12000;
 const MODEL = Deno.env.get('OPENAI_MODEL') ?? 'gpt-4.1-mini';
+const INSUFFICIENT_CREDITS_MESSAGE = 'You do not have enough credits. Please purchase a Test pack or Business pack.';
 
 const responseSchema = {
   type: 'object',
@@ -183,6 +186,12 @@ Tasks:
   return normalizeResult(JSON.parse(outputText) as AnalysisResult, warning);
 }
 
+function getRequiredEnv(name: string): string {
+  const value = Deno.env.get(name);
+  if (!value) throw new Error(`${name} is not configured in Supabase secrets.`);
+  return value;
+}
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -198,10 +207,39 @@ Deno.serve(async (request) => {
   }
 
   try {
+    const supabaseUrl = getRequiredEnv('SUPABASE_URL');
+    const supabaseAnonKey = getRequiredEnv('SUPABASE_ANON_KEY');
+    const supabaseServiceRoleKey = getRequiredEnv('SUPABASE_SERVICE_ROLE_KEY');
+    const authHeader = request.headers.get('Authorization');
+    if (!authHeader) return jsonResponse({ error: 'Missing Authorization header.' }, { status: 401 });
+
+    const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: authHeader } },
+      auth: { persistSession: false },
+    });
+    const admin = createClient(supabaseUrl, supabaseServiceRoleKey, { auth: { persistSession: false } });
+
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || !user) return jsonResponse({ error: 'Invalid or expired Supabase session.' }, { status: 401 });
+
+    const { data: balanceRow, error: balanceError } = await admin
+      .from('user_credit_balances')
+      .select('"remaining credits"')
+      .eq('user_id', user.id)
+      .maybeSingle();
+    if (balanceError) throw balanceError;
+
+    const remainingCredits = Number(balanceRow?.['remaining credits'] ?? 0);
+    if (remainingCredits <= 0) return jsonResponse({ error: INSUFFICIENT_CREDITS_MESSAGE }, { status: 402 });
+
     const body = await request.json() as AnalyzeRequest;
     const text = validateText(body);
     const result = await analyzePatentText(text, apiKey);
-    return jsonResponse(result);
+
+    const { data: updatedRemainingCredits, error: consumeError } = await admin.rpc('consume_analysis_credit', { p_user_id: user.id });
+    if (consumeError) throw consumeError;
+
+    return jsonResponse({ ...result, remainingCredits: updatedRemainingCredits });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to analyze patent text.';
     const status = message.includes('too long') ? 413 : 400;

@@ -42,6 +42,8 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [error, setError] = useState('');
+  const [remainingCredits, setRemainingCredits] = useState<number | null>(null);
+  const [balanceLoading, setBalanceLoading] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -57,6 +59,11 @@ export default function App() {
     return () => subscription.subscription.unsubscribe();
   }, []);
 
+  useEffect(() => {
+    void refreshRemainingCredits();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.user.id]);
+
   const sortedKeywords = useMemo(
     () =>
       Array.isArray(result?.keywords)
@@ -69,6 +76,35 @@ export default function App() {
     () => estimateResultTime(text.trim().length),
     [text],
   );
+
+  async function refreshRemainingCredits() {
+    if (!session) {
+      setRemainingCredits(0);
+      return 0;
+    }
+
+    setBalanceLoading(true);
+
+    const { data, error: balanceError } = await supabase
+      .from('user_credit_balances')
+      .select('remaining_credits')
+      .eq('user_id', session.user.id)
+      .maybeSingle();
+
+    if (balanceError) {
+      setError(balanceError.message);
+      setRemainingCredits(0);
+      setBalanceLoading(false);
+      return 0;
+    }
+
+    const credits = Number(data?.remaining_credits ?? 0);
+    console.log('credits after refresh =', credits);
+    setRemainingCredits(credits);
+    setBalanceLoading(false);
+    return credits;
+  }
+
 
   async function handleAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -107,6 +143,14 @@ export default function App() {
       return;
     }
 
+    const creditsBeforeAnalysis = remainingCredits ?? await refreshRemainingCredits();
+    console.log('credits before analysis =', creditsBeforeAnalysis);
+
+    if (creditsBeforeAnalysis <= 0) {
+      setError('No analysis credits remaining. Please purchase credits before analyzing patent text.');
+      return;
+    }
+
     setLoading(true);
     setError('');
     setResult(null);
@@ -124,7 +168,17 @@ export default function App() {
         throw new Error('Analyze request completed without returning a result.');
       }
 
+      console.log('analysis success');
       setResult(data);
+
+      const consumeResult = await supabase.rpc('consume_analysis_credit', { p_user_id: session.user.id });
+      console.log('consume_analysis_credit result =', consumeResult);
+
+      if (consumeResult.error) {
+        throw consumeResult.error;
+      }
+
+      await refreshRemainingCredits();
     } catch (analyzeError) {
       setError(asErrorMessage(analyzeError));
     } finally {
@@ -208,7 +262,13 @@ export default function App() {
           <button type="button" className="secondary" onClick={handleSignOut}>Sign out</button>
         </div>
       </header>
-      <PricingPlans session={session} onError={setError} />
+      <PricingPlans
+        session={session}
+        onError={setError}
+        remainingCredits={remainingCredits}
+        balanceLoading={balanceLoading}
+        refreshRemainingCredits={refreshRemainingCredits}
+      />
       <section className="card input-card">
         <div className="section-heading">
           <h2>Patent text</h2>

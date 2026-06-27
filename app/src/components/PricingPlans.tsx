@@ -25,8 +25,6 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
   const t = messages[language];
   const [loadingPlan, setLoadingPlan] = useState<PlanId | null>(null);
   const [remainingCredits, setRemainingCredits] = useState<number | null>(null);
-  const [returnedPlan, setReturnedPlan] = useState<PlanId | null>(null);
-  const [currentPlan, setCurrentPlan] = useState<PlanId | null>(null);
   const [balanceLoading, setBalanceLoading] = useState(false);
 
   async function fetchRemainingCredits() {
@@ -51,26 +49,6 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
     }
 
     const credits = Number(data?.remaining_credits ?? 0);
-
-    if (credits <= 0) {
-      setCurrentPlan(null);
-    }
-
-    if (credits > 0) {
-      const { data: transaction } = await supabase
-        .from('credit_transactions')
-        .select('plan_id')
-        .eq('user_id', session.user.id)
-        .gt('credits', 0)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (transaction?.plan_id === 'test' || transaction?.plan_id === 'business') {
-        setCurrentPlan(transaction.plan_id);
-      }
-    }
-
     console.log('remainingCredits =', credits);
     setRemainingCredits(credits);
     setBalanceLoading(false);
@@ -88,7 +66,6 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
     const nextPlan = plan === 'test' || plan === 'business' ? plan : fallbackPlan;
 
     if (nextPlan === 'test' || nextPlan === 'business') {
-      setReturnedPlan(nextPlan);
       void fetchRemainingCredits();
       window.localStorage.removeItem('lastCheckoutPlan');
     }
@@ -110,6 +87,7 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
       const displayedPrice = formatPlanPrice(planId, currency, browserLocale);
       console.log('locale =', language);
       console.log('currency =', localizedPricing.currency);
+      console.log('planId =', planId);
       console.log('displayPrice =', displayedPrice);
       console.log('stripePriceId =', selectedPriceId);
 
@@ -128,29 +106,37 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
     }
   }
 
-
-  const hasCredits = remainingCredits !== null && remainingCredits > 0;
-  const statusPlanId = currentPlan ?? returnedPlan ?? (remainingCredits !== null && remainingCredits > 2 ? 'business' : 'test');
-  const statusPlanName = localizedPricing.plans[statusPlanId].label;
-
   if (balanceLoading || remainingCredits === null) {
     return (
       <section className="pricing-section" aria-labelledby="pricing-heading">
         <div className="pricing-heading">
           <h2 id="pricing-heading">{t.heading}</h2>
-          <p>{t.planStatusLoading}</p>
+          <p>{t.description}</p>
+        </div>
+        <div className="current-plan-card">
+          {language === 'ja' ? '読み込み中...' : 'Loading...'}
         </div>
       </section>
     );
   }
 
-  if (hasCredits) {
+  if (remainingCredits > 0) {
     return (
       <section className="pricing-section" aria-labelledby="pricing-heading">
+        <div className="pricing-heading">
+          <h2 id="pricing-heading">{t.heading}</h2>
+          <p>{t.description}</p>
+        </div>
+
         <article className="current-plan-card">
-          <p className="current-plan-label">{t.currentPlan}</p>
-          <h3>{statusPlanName}</h3>
-          <p className="remaining-credits">{t.remaining(remainingCredits)}</p>
+          <p className="current-plan-title">
+            {language === 'ja' ? '利用可能な分析回数' : 'Available Analyses'}
+          </p>
+          <p className="remaining-credits">
+            {language === 'ja'
+              ? `残り分析回数: ${remainingCredits}回`
+              : `Remaining analyses: ${remainingCredits}`}
+          </p>
         </article>
       </section>
     );
@@ -169,6 +155,7 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
           const selectedPriceId = localizedPricing.plans[plan.id].stripePriceId;
           console.log('locale =', language);
           console.log('currency =', localizedPricing.currency);
+          console.log('planId =', plan.id);
           console.log('displayPrice =', price);
           console.log('stripePriceId =', selectedPriceId);
           const name = plan.id === 'test' ? t.testName : t.businessName;

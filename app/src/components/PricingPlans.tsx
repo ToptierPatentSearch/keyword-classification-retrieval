@@ -7,6 +7,9 @@ import { formatPlanPrice, getLocalizedPricing, PRICING_PLANS, type PlanId } from
 interface PricingPlansProps {
   session: Session | null;
   onError: (message: string) => void;
+  remainingCredits: number | null;
+  balanceLoading: boolean;
+  refreshRemainingCredits: () => Promise<number>;
 }
 
 function asErrorMessage(error: unknown): string {
@@ -17,67 +20,44 @@ function iconForPlan(planId: PlanId) {
   return planId === 'test' ? '⚗️' : '💼';
 }
 
-export function PricingPlans({ session, onError }: PricingPlansProps) {
+export function PricingPlans({ session, onError, remainingCredits, balanceLoading, refreshRemainingCredits }: PricingPlansProps) {
   const browserLocale = typeof navigator === 'undefined' ? 'en-US' : navigator.languages?.[0] || navigator.language || 'en-US';
   const language = useMemo(() => detectLanguage(), []);
   const currency = useMemo<SupportedCurrency>(() => detectCurrency(), []);
   const localizedPricing = useMemo(() => getLocalizedPricing(currency), [currency]);
   const t = messages[language];
   const [loadingPlan, setLoadingPlan] = useState<PlanId | null>(null);
-  const [remainingCredits, setRemainingCredits] = useState<number | null>(null);
   const [returnedPlan, setReturnedPlan] = useState<PlanId | null>(null);
   const [currentPlan, setCurrentPlan] = useState<PlanId | null>(null);
-  const [balanceLoading, setBalanceLoading] = useState(false);
 
-  async function fetchRemainingCredits() {
-    if (!session) {
-      setRemainingCredits(0);
-      return;
-    }
-
-    setBalanceLoading(true);
-
-    const { data, error } = await supabase
-      .from('user_credit_balances')
-      .select('remaining_credits')
-      .eq('user_id', session.user.id)
-      .maybeSingle();
-
-    if (error) {
-      onError(`${t.checkoutError} ${error.message}`);
-      setRemainingCredits(0);
-      setBalanceLoading(false);
-      return;
-    }
-
-    const credits = Number(data?.remaining_credits ?? 0);
+  async function updateCreditsAndPlan() {
+    const credits = await refreshRemainingCredits();
 
     if (credits <= 0) {
       setCurrentPlan(null);
+      return;
     }
 
-    if (credits > 0) {
-      const { data: transaction } = await supabase
-        .from('credit_transactions')
-        .select('plan_id')
-        .eq('user_id', session.user.id)
-        .gt('credits', 0)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (transaction?.plan_id === 'test' || transaction?.plan_id === 'business') {
-        setCurrentPlan(transaction.plan_id);
-      }
+    if (!session) {
+      return;
     }
 
-    console.log('remainingCredits =', credits);
-    setRemainingCredits(credits);
-    setBalanceLoading(false);
+    const { data: transaction } = await supabase
+      .from('credit_transactions')
+      .select('plan_id')
+      .eq('user_id', session.user.id)
+      .gt('credits', 0)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (transaction?.plan_id === 'test' || transaction?.plan_id === 'business') {
+      setCurrentPlan(transaction.plan_id);
+    }
   }
 
   useEffect(() => {
-    void fetchRemainingCredits();
+    void updateCreditsAndPlan();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.user.id]);
 
@@ -89,7 +69,7 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
 
     if (nextPlan === 'test' || nextPlan === 'business') {
       setReturnedPlan(nextPlan);
-      void fetchRemainingCredits();
+      void updateCreditsAndPlan();
       window.localStorage.removeItem('lastCheckoutPlan');
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

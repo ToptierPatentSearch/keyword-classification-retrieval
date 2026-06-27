@@ -36,7 +36,7 @@ export const LOCALIZED_PRICING: Record<SupportedCurrency, LocalizedPricing> = {
     symbol: '$',
     plans: {
       test: { label: 'Test Pack', amount: 5, stripePriceId: stripePriceId('VITE_STRIPE_PRICE_TEST_USD') },
-      business: { label: 'Business Pack', amount: 10, stripePriceId: stripePriceId('VITE_STRIPE_PRICE_BUSINESS_USD') },
+      business: { label: 'Business Pack', amount: 20, stripePriceId: stripePriceId('VITE_STRIPE_PRICE_BUSINESS_USD') },
     },
   },
   jpy: {
@@ -45,7 +45,7 @@ export const LOCALIZED_PRICING: Record<SupportedCurrency, LocalizedPricing> = {
     symbol: '¥',
     plans: {
       test: { label: 'テストパック', amount: 500, stripePriceId: stripePriceId('VITE_STRIPE_PRICE_TEST_JPY') },
-      business: { label: 'ビジネスパック', amount: 1500, stripePriceId: stripePriceId('VITE_STRIPE_PRICE_BUSINESS_JPY') },
+      business: { label: 'ビジネスパック', amount: 2000, stripePriceId: stripePriceId('VITE_STRIPE_PRICE_BUSINESS_JPY') },
     },
   },
   eur: {
@@ -54,7 +54,7 @@ export const LOCALIZED_PRICING: Record<SupportedCurrency, LocalizedPricing> = {
     symbol: '€',
     plans: {
       test: { label: 'Test Pack', amount: 5, stripePriceId: stripePriceId('VITE_STRIPE_PRICE_TEST_EUR') },
-      business: { label: 'Business Pack', amount: 10, stripePriceId: stripePriceId('VITE_STRIPE_PRICE_BUSINESS_EUR') },
+      business: { label: 'Business Pack', amount: 20, stripePriceId: stripePriceId('VITE_STRIPE_PRICE_BUSINESS_EUR') },
     },
   },
 };

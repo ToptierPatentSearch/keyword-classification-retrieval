@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from '../supabaseClient';
 import { detectCurrency, detectLanguage, messages, type SupportedCurrency } from '../lib/locale';
-import { formatPlanPrice, PRICING_PLANS, type PlanId } from '../lib/pricing';
+import { formatPlanPrice, getLocalizedPricing, PRICING_PLANS, type PlanId } from '../lib/pricing';
 
 interface PricingPlansProps {
   session: Session | null;
@@ -21,13 +21,19 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
   const browserLocale = typeof navigator === 'undefined' ? 'en-US' : navigator.languages?.[0] || navigator.language || 'en-US';
   const language = useMemo(() => detectLanguage(), []);
   const currency = useMemo<SupportedCurrency>(() => detectCurrency(), []);
+  const localizedPricing = useMemo(() => getLocalizedPricing(currency), [currency]);
   const t = messages[language];
   const [loadingPlan, setLoadingPlan] = useState<PlanId | null>(null);
   const [remainingCredits, setRemainingCredits] = useState<number | null>(null);
-  const [returnedPlan, setReturnedPlan] = useState<PlanId | null>(null);
+  const [balanceLoading, setBalanceLoading] = useState(false);
 
   async function fetchRemainingCredits() {
-    if (!session) return;
+    if (!session) {
+      setRemainingCredits(0);
+      return;
+    }
+
+    setBalanceLoading(true);
 
     const { data, error } = await supabase
       .from('user_credit_balances')
@@ -37,11 +43,21 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
 
     if (error) {
       onError(`${t.checkoutError} ${error.message}`);
+      setRemainingCredits(0);
+      setBalanceLoading(false);
       return;
     }
 
-    setRemainingCredits(Number(data?.remaining_credits ?? 0));
+    const credits = Number(data?.remaining_credits ?? 0);
+    console.log('remainingCredits =', credits);
+    setRemainingCredits(credits);
+    setBalanceLoading(false);
   }
+
+  useEffect(() => {
+    void fetchRemainingCredits();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.user.id]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -50,7 +66,6 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
     const nextPlan = plan === 'test' || plan === 'business' ? plan : fallbackPlan;
 
     if (nextPlan === 'test' || nextPlan === 'business') {
-      setReturnedPlan(nextPlan);
       void fetchRemainingCredits();
       window.localStorage.removeItem('lastCheckoutPlan');
     }
@@ -68,6 +83,14 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
     window.localStorage.setItem('lastCheckoutPlan', planId);
 
     try {
+      const selectedPriceId = localizedPricing.plans[planId].stripePriceId;
+      const displayedPrice = formatPlanPrice(planId, currency, browserLocale);
+      console.log('locale =', language);
+      console.log('currency =', localizedPricing.currency);
+      console.log('planId =', planId);
+      console.log('displayPrice =', displayedPrice);
+      console.log('stripePriceId =', selectedPriceId);
+
       const { data, error } = await supabase.functions.invoke('create-checkout-session', {
         body: { planId, credits, currency },
       });
@@ -83,6 +106,42 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
     }
   }
 
+  if (balanceLoading || remainingCredits === null) {
+    return (
+      <section className="pricing-section" aria-labelledby="pricing-heading">
+        <div className="pricing-heading">
+          <h2 id="pricing-heading">{t.heading}</h2>
+          <p>{t.description}</p>
+        </div>
+        <div className="current-plan-card">
+          {language === 'ja' ? '読み込み中...' : 'Loading...'}
+        </div>
+      </section>
+    );
+  }
+
+  if (remainingCredits > 0) {
+    return (
+      <section className="pricing-section" aria-labelledby="pricing-heading">
+        <div className="pricing-heading">
+          <h2 id="pricing-heading">{t.heading}</h2>
+          <p>{t.description}</p>
+        </div>
+
+        <article className="current-plan-card">
+          <p className="current-plan-title">
+            {language === 'ja' ? '利用可能な分析回数' : 'Available Analyses'}
+          </p>
+          <p className="remaining-credits">
+            {language === 'ja'
+              ? `残り分析回数: ${remainingCredits}回`
+              : `Remaining analyses: ${remainingCredits}`}
+          </p>
+        </article>
+      </section>
+    );
+  }
+
   return (
     <section className="pricing-section" aria-labelledby="pricing-heading">
       <div className="pricing-heading">
@@ -93,6 +152,12 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
       <div className="pricing-grid">
         {PRICING_PLANS.map((plan) => {
           const price = formatPlanPrice(plan.id, currency, browserLocale);
+          const selectedPriceId = localizedPricing.plans[plan.id].stripePriceId;
+          console.log('locale =', language);
+          console.log('currency =', localizedPricing.currency);
+          console.log('planId =', plan.id);
+          console.log('displayPrice =', price);
+          console.log('stripePriceId =', selectedPriceId);
           const name = plan.id === 'test' ? t.testName : t.businessName;
           const description = plan.id === 'test' ? t.testDescription : t.businessDescription;
           const creditLabel = plan.credits === 2 ? t.credits2 : t.credits10;
@@ -119,10 +184,6 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
                 <strong>{price}</strong>
                 <span>{t.oneTime}</span>
               </div>
-
-              {returnedPlan === plan.id && remainingCredits !== null && (
-                <p className="remaining-credits">{t.remaining(remainingCredits)}</p>
-              )}
 
               <button
                 className="pricing-buy-button"

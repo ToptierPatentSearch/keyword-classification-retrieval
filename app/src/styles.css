@@ -83,6 +83,10 @@ tr:last-child td { border-bottom: 0; }
 .pricing-heading h2 { font-size: clamp(2rem, 5vw, 3.2rem); }
 .pricing-heading p { margin: 14px auto 0; color: #4b5563; font-size: clamp(1.05rem, 2vw, 1.45rem); }
 .pricing-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 34px; }
+.credit-status-card { max-width: 420px; margin: 0 auto; padding: 24px; border: 1px solid #bfdbfe; border-radius: 20px; background: rgba(255, 255, 255, 0.96); box-shadow: 0 16px 36px rgba(15, 23, 42, 0.1); text-align: center; }
+.credit-status-label { margin: 0 0 10px; color: #4b5563; font-size: 1rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; }
+.credit-status-card strong { display: block; color: #0754c9; font-size: clamp(2.5rem, 6vw, 4rem); line-height: 1; }
+.credit-status-pack { margin: 14px 0 0; color: #1f2937; font-size: 1.05rem; font-weight: 800; }
 .pricing-card { overflow: hidden; border: 1px solid; border-radius: 20px; background: rgba(255, 255, 255, 0.96); box-shadow: 0 20px 48px rgba(15, 23, 42, 0.1); }
 .pricing-card-hero { display: flex; align-items: center; gap: 24px; padding: 34px 38px 28px; }
 .pricing-icon { display: grid; place-items: center; width: 92px; height: 92px; border-radius: 24px; font-size: 3.9rem; background: rgba(255, 255, 255, 0.55); }

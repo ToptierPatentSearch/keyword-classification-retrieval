@@ -24,10 +24,14 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
   const t = messages[language];
   const [loadingPlan, setLoadingPlan] = useState<PlanId | null>(null);
   const [remainingCredits, setRemainingCredits] = useState<number | null>(null);
-  const [returnedPlan, setReturnedPlan] = useState<PlanId | null>(null);
+  const [currentPlan, setCurrentPlan] = useState<PlanId | null>(null);
 
   async function fetchRemainingCredits() {
-    if (!session) return;
+    if (!session) {
+      setRemainingCredits(0);
+      setCurrentPlan(null);
+      return;
+    }
 
     const { data, error } = await supabase
       .from('user_credit_balances')
@@ -40,7 +44,33 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
       return;
     }
 
-    setRemainingCredits(Number(data?.remaining_credits ?? 0));
+    const nextRemainingCredits = Number(data?.remaining_credits ?? 0);
+    setRemainingCredits(nextRemainingCredits);
+
+    if (import.meta.env.DEV) {
+      console.log("remainingCredits", nextRemainingCredits);
+    }
+
+    if (nextRemainingCredits <= 0) {
+      setCurrentPlan(null);
+      return;
+    }
+
+    const { data: transaction, error: transactionError } = await supabase
+      .from('credit_transactions')
+      .select('plan_id')
+      .eq('user_id', session.user.id)
+      .gt('credits', 0)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (transactionError) {
+      onError(`${t.checkoutError} ${transactionError.message}`);
+      return;
+    }
+
+    setCurrentPlan(transaction?.plan_id === 'test' || transaction?.plan_id === 'business' ? transaction.plan_id : null);
   }
 
   useEffect(() => {
@@ -50,10 +80,11 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
     const nextPlan = plan === 'test' || plan === 'business' ? plan : fallbackPlan;
 
     if (nextPlan === 'test' || nextPlan === 'business') {
-      setReturnedPlan(nextPlan);
-      void fetchRemainingCredits();
+      setCurrentPlan(nextPlan);
       window.localStorage.removeItem('lastCheckoutPlan');
     }
+
+    void fetchRemainingCredits();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.user.id]);
 
@@ -83,6 +114,9 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
     }
   }
 
+  const hasActiveCredits = remainingCredits !== null && remainingCredits > 0;
+  const currentPlanName = currentPlan === 'test' ? t.testName : currentPlan === 'business' ? t.businessName : null;
+
   return (
     <section className="pricing-section" aria-labelledby="pricing-heading">
       <div className="pricing-heading">
@@ -90,54 +124,58 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
         <p>{t.description}</p>
       </div>
 
-      <div className="pricing-grid">
-        {PRICING_PLANS.map((plan) => {
-          const price = formatPlanPrice(plan.id, currency, browserLocale);
-          const name = plan.id === 'test' ? t.testName : t.businessName;
-          const description = plan.id === 'test' ? t.testDescription : t.businessDescription;
-          const creditLabel = plan.credits === 2 ? t.credits2 : t.credits10;
-          const validLabel = plan.validityDays === 30 ? t.valid30 : t.valid180;
-          const isLoading = loadingPlan === plan.id;
+      {hasActiveCredits ? (
+        <article className="credit-status-card">
+          <p className="credit-status-label">{language === 'ja' ? '有効なクレジット' : 'Active credits'}</p>
+          <strong>{remainingCredits}</strong>
+          {currentPlanName && <p className="credit-status-pack">{language === 'ja' ? '現在のパック' : 'Current pack'}: {currentPlanName}</p>}
+        </article>
+      ) : (
+        <div className="pricing-grid">
+          {PRICING_PLANS.map((plan) => {
+            const price = formatPlanPrice(plan.id, currency, browserLocale);
+            const name = plan.id === 'test' ? t.testName : t.businessName;
+            const description = plan.id === 'test' ? t.testDescription : t.businessDescription;
+            const creditLabel = plan.credits === 2 ? t.credits2 : t.credits10;
+            const validLabel = plan.validityDays === 30 ? t.valid30 : t.valid180;
+            const isLoading = loadingPlan === plan.id;
 
-          return (
-            <article key={plan.id} className={`pricing-card pricing-card-${plan.theme}`}>
-              <div className="pricing-card-hero">
-                <span className="pricing-icon" aria-hidden="true">{iconForPlan(plan.id)}</span>
-                <div>
-                  <p className="pricing-credit-count">{plan.credits} {language === 'ja' ? '回分' : 'Analyses'}</p>
-                  <h3>{name}</h3>
+            return (
+              <article key={plan.id} className={`pricing-card pricing-card-${plan.theme}`}>
+                <div className="pricing-card-hero">
+                  <span className="pricing-icon" aria-hidden="true">{iconForPlan(plan.id)}</span>
+                  <div>
+                    <p className="pricing-credit-count">{plan.credits} {language === 'ja' ? '回分' : 'Analyses'}</p>
+                    <h3>{name}</h3>
+                  </div>
                 </div>
-              </div>
 
-              <p className="pricing-description">{description}</p>
-              <ul className="pricing-features">
-                <li><span aria-hidden="true">✓</span>{creditLabel}</li>
-                <li><span aria-hidden="true">✓</span>{validLabel}</li>
-              </ul>
+                <p className="pricing-description">{description}</p>
+                <ul className="pricing-features">
+                  <li><span aria-hidden="true">✓</span>{creditLabel}</li>
+                  <li><span aria-hidden="true">✓</span>{validLabel}</li>
+                </ul>
 
-              <div className="pricing-price">
-                <strong>{price}</strong>
-                <span>{t.oneTime}</span>
-              </div>
+                <div className="pricing-price">
+                  <strong>{price}</strong>
+                  <span>{t.oneTime}</span>
+                </div>
 
-              {returnedPlan === plan.id && remainingCredits !== null && (
-                <p className="remaining-credits">{t.remaining(remainingCredits)}</p>
-              )}
-
-              <button
-                className="pricing-buy-button"
-                type="button"
-                disabled={loadingPlan !== null}
-                onClick={() => void handleCheckout(plan.id, plan.credits)}
-                aria-label={isLoading ? t.loading(plan.credits) : t.buy(plan.credits, price)}
-              >
-                <span aria-hidden="true">🛒</span>
-                {isLoading ? t.loading(plan.credits) : t.buy(plan.credits, price)}
-              </button>
-            </article>
-          );
-        })}
-      </div>
+                <button
+                  className="pricing-buy-button"
+                  type="button"
+                  disabled={loadingPlan !== null}
+                  onClick={() => void handleCheckout(plan.id, plan.credits)}
+                  aria-label={isLoading ? t.loading(plan.credits) : t.buy(plan.credits, price)}
+                >
+                  <span aria-hidden="true">🛒</span>
+                  {isLoading ? t.loading(plan.credits) : t.buy(plan.credits, price)}
+                </button>
+              </article>
+            );
+          })}
+        </div>
+      )}
     </section>
   );
 }

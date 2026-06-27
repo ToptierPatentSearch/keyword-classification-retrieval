@@ -1,10 +1,12 @@
 import OpenAI from 'npm:openai@^5.0.0';
+import { createClient } from 'npm:@supabase/supabase-js@^2.44.4';
 
 type Confidence = 'high' | 'medium' | 'low';
 type PatentLanguage = 'en' | 'ja';
 
 interface AnalyzeRequest {
   text?: unknown;
+  input?: unknown;
 }
 
 interface KeywordClassification {
@@ -24,6 +26,7 @@ interface AnalysisResult {
   language: PatentLanguage;
   keywords: KeywordClassification[];
   warning?: string;
+  remainingCredits?: number;
 }
 
 const corsHeaders = {
@@ -36,6 +39,8 @@ const corsHeaders = {
 const MAX_INPUT_CHARS = 50000;
 const LONG_INPUT_WARNING_CHARS = 12000;
 const MODEL = Deno.env.get('OPENAI_MODEL') ?? 'gpt-4.1-mini';
+
+const NO_CREDITS_MESSAGE = '分析クレジットがありません。Test pack または Business pack を購入してください。';
 
 const responseSchema = {
   type: 'object',
@@ -89,12 +94,22 @@ function jsonResponse(body: unknown, init: ResponseInit = {}) {
   });
 }
 
+function getRequiredEnv(name: string): string {
+  const value = Deno.env.get(name);
+  if (!value) {
+    throw new Error(`${name} is not configured in Supabase secrets.`);
+  }
+  return value;
+}
+
 function validateText(body: AnalyzeRequest): string {
-  if (typeof body.text !== 'string') {
+  const rawText = typeof body.text === 'string' ? body.text : body.input;
+
+  if (typeof rawText !== 'string') {
     throw new Error('Request body must include a string field named "text".');
   }
 
-  const text = body.text.trim();
+  const text = rawText.trim();
   if (!text) {
     throw new Error('Text must not be empty.');
   }
@@ -149,6 +164,7 @@ Tasks:
 - Normalize synonyms into a canonical normalized_term, including examples such as AI/artificial intelligence and semiconductor device/semiconductor apparatus.
 - Count occurrences across direct terms and clear synonyms; rank by descending frequency.
 - Map each keyword to likely IPC, CPC, FI, and F-term codes when supportable.
+- For every keyword object, include a concise but specific reason explaining why the keyword and classifications were selected from the input evidence.
 - First attempt classification mapping using your knowledge. If uncertain, set classification_confidence to low.
 - Do not invent overly specific FI or F-term codes. Leave arrays empty when a code family cannot be responsibly inferred.
 - Prefer concise reasons and keep the output extensible for future USPTO CPC, WIPO IPC, and JPO FI/F-term data integration.`,
@@ -185,26 +201,105 @@ Tasks:
 
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders });
+    return new Response('ok', {
+      status: 200,
+      headers: corsHeaders,
+    });
   }
 
   if (request.method !== 'POST') {
-    return jsonResponse({ error: 'Method not allowed. Use POST.' }, { status: 405 });
-  }
-
-  const apiKey = Deno.env.get('OPENAI_API_KEY');
-  if (!apiKey) {
-    return jsonResponse({ error: 'OPENAI_API_KEY is not configured in Supabase secrets.' }, { status: 500 });
+    return jsonResponse(
+      { error: 'Method not allowed. Use POST.' },
+      { status: 405 }
+    );
   }
 
   try {
+    const apiKey = getRequiredEnv('OPENAI_API_KEY');
+    const supabaseUrl = getRequiredEnv('SUPABASE_URL');
+    const supabaseAnonKey = getRequiredEnv('SUPABASE_ANON_KEY');
+    const supabaseServiceRoleKey = getRequiredEnv('SUPABASE_SERVICE_ROLE_KEY');
+
+    const authHeader = request.headers.get('Authorization');
+    if (!authHeader) {
+      return jsonResponse({ error: 'Authentication required.' }, { status: 401 });
+    }
+
+    const authClient = createClient(supabaseUrl, supabaseAnonKey, {
+      global: {
+        headers: {
+          Authorization: authHeader,
+        },
+      },
+    });
+
+    const {
+      data: { user },
+      error: userError,
+    } = await authClient.auth.getUser();
+
+    if (userError || !user) {
+      return jsonResponse({ error: 'Authentication required.' }, { status: 401 });
+    }
+
+    const adminClient = createClient(supabaseUrl, supabaseServiceRoleKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+      },
+    });
+
+    const { data: creditRow, error: creditError } = await adminClient
+      .from('user_credit_balances')
+      .select('"remaining credits"')
+      .eq('user_id', user.id)
+      .single();
+
+    if (creditError) {
+      return jsonResponse({ error: creditError.message }, { status: 500 });
+    }
+
+    const currentCredits = Number(creditRow?.['remaining credits'] ?? 0);
+    if (!Number.isFinite(currentCredits) || currentCredits <= 0) {
+      return jsonResponse({ error: NO_CREDITS_MESSAGE, remainingCredits: 0 }, { status: 402 });
+    }
+
     const body = await request.json() as AnalyzeRequest;
     const text = validateText(body);
     const result = await analyzePatentText(text, apiKey);
-    return jsonResponse(result);
+
+    const { error: consumeError } = await adminClient.rpc('consume_analysis_credit', {
+      p_user_id: user.id,
+    });
+
+    if (consumeError) {
+      return jsonResponse({ error: consumeError.message }, { status: 500 });
+    }
+
+    const { data: updatedCreditRow, error: updatedCreditError } = await adminClient
+      .from('user_credit_balances')
+      .select('"remaining credits"')
+      .eq('user_id', user.id)
+      .single();
+
+    if (updatedCreditError) {
+      return jsonResponse({ error: updatedCreditError.message }, { status: 500 });
+    }
+
+    const remainingCredits = Number(updatedCreditRow?.['remaining credits'] ?? 0);
+
+    return jsonResponse({
+      ...result,
+      remainingCredits,
+    });
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Failed to analyze patent text.';
+    const message =
+      error instanceof Error
+        ? error.message
+        : 'Failed to analyze patent text.';
+
     const status = message.includes('too long') ? 413 : 400;
+
     return jsonResponse({ error: message }, { status });
   }
 });

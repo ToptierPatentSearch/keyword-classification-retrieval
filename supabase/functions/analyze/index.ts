@@ -251,7 +251,7 @@ Deno.serve(async (request) => {
 
     const { data: creditRow, error: creditError } = await adminClient
       .from('user_credit_balances')
-      .select('"remaining credits"')
+      .select('remaining_credits')
       .eq('user_id', user.id)
       .single();
 
@@ -259,7 +259,7 @@ Deno.serve(async (request) => {
       return jsonResponse({ error: creditError.message }, { status: 500 });
     }
 
-    const currentCredits = Number(creditRow?.['remaining credits'] ?? 0);
+    const currentCredits = Number(creditRow?.remaining_credits ?? 0);
     if (!Number.isFinite(currentCredits) || currentCredits <= 0) {
       return jsonResponse({ error: NO_CREDITS_MESSAGE, remainingCredits: 0 }, { status: 402 });
     }
@@ -286,7 +286,7 @@ Deno.serve(async (request) => {
       return jsonResponse({ error: updatedCreditError.message }, { status: 500 });
     }
 
-    const remainingCredits = Number(updatedCreditRow?.['remaining credits'] ?? 0);
+    const remainingCredits = Number(updatedCreditRow?.remaining_credits ?? 0);
 
     return jsonResponse({
       ...result,

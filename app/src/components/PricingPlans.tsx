@@ -7,6 +7,7 @@ import { formatPlanPrice, getLocalizedPricing, PRICING_PLANS, type PlanId } from
 interface PricingPlansProps {
   session: Session | null;
   onError: (message: string) => void;
+  refreshKey?: number;
 }
 
 function asErrorMessage(error: unknown): string {
@@ -17,12 +18,21 @@ function iconForPlan(planId: PlanId) {
   return planId === 'test' ? '⚗️' : '💼';
 }
 
-export function PricingPlans({ session, onError }: PricingPlansProps) {
-  const browserLocale = typeof navigator === 'undefined' ? 'en-US' : navigator.languages?.[0] || navigator.language || 'en-US';
+export function PricingPlans({
+  session,
+  onError,
+  refreshKey,
+}: PricingPlansProps) {
+  const browserLocale =
+    typeof navigator === 'undefined'
+      ? 'en-US'
+      : navigator.languages?.[0] || navigator.language || 'en-US';
+
   const language = useMemo(() => detectLanguage(), []);
   const currency = useMemo<SupportedCurrency>(() => detectCurrency(), []);
   const localizedPricing = useMemo(() => getLocalizedPricing(currency), [currency]);
   const t = messages[language];
+
   const [loadingPlan, setLoadingPlan] = useState<PlanId | null>(null);
   const [remainingCredits, setRemainingCredits] = useState<number | null>(null);
   const [balanceLoading, setBalanceLoading] = useState(false);
@@ -35,41 +45,52 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
 
     setBalanceLoading(true);
 
-    const { data, error } = await supabase
-      .from('user_credit_balances')
-      .select('remaining_credits')
-      .eq('user_id', session.user.id)
-      .maybeSingle();
+    try {
+      const { data, error } = await supabase
+        .from('user_credit_balances')
+        .select('remaining_credits')
+        .eq('user_id', session.user.id)
+        .maybeSingle();
 
-    if (error) {
-      onError(`${t.checkoutError} ${error.message}`);
+      if (error) {
+        throw error;
+      }
+
+      const credits = Number(data?.remaining_credits ?? 0);
+
+      console.log('Credit balance row:', data);
+      console.log('remainingCredits =', credits);
+
+      setRemainingCredits(credits);
+    } catch (error) {
+      onError(`${t.checkoutError} ${asErrorMessage(error)}`);
       setRemainingCredits(0);
+    } finally {
       setBalanceLoading(false);
-      return;
     }
-
-    const credits = Number(data?.remaining_credits ?? 0);
-    console.log('remainingCredits =', credits);
-    setRemainingCredits(credits);
-    setBalanceLoading(false);
   }
 
   useEffect(() => {
     void fetchRemainingCredits();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session?.user.id]);
+  }, [session?.user.id, refreshKey]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    const checkout = params.get('checkout');
     const plan = params.get('purchasedPlan') as PlanId | null;
     const fallbackPlan = window.localStorage.getItem('lastCheckoutPlan') as PlanId | null;
     const nextPlan = plan === 'test' || plan === 'business' ? plan : fallbackPlan;
 
-    if (nextPlan === 'test' || nextPlan === 'business') {
+    if (checkout === 'success' || nextPlan === 'test' || nextPlan === 'business') {
       void fetchRemainingCredits();
       window.localStorage.removeItem('lastCheckoutPlan');
+
+      window.history.replaceState(
+        {},
+        document.title,
+        window.location.pathname
+      );
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.user.id]);
 
   async function handleCheckout(planId: PlanId, credits: number) {
@@ -85,6 +106,7 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
     try {
       const selectedPriceId = localizedPricing.plans[planId].stripePriceId;
       const displayedPrice = formatPlanPrice(planId, currency, browserLocale);
+
       console.log('locale =', language);
       console.log('currency =', localizedPricing.currency);
       console.log('planId =', planId);
@@ -100,7 +122,11 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
 
       window.location.href = data.url;
     } catch (checkoutError) {
-      onError(`${t.checkoutError}${asErrorMessage(checkoutError) ? ` ${asErrorMessage(checkoutError)}` : ''}`);
+      onError(
+        `${t.checkoutError}${
+          asErrorMessage(checkoutError) ? ` ${asErrorMessage(checkoutError)}` : ''
+        }`
+      );
       setLoadingPlan(null);
       window.localStorage.removeItem('lastCheckoutPlan');
     }
@@ -153,11 +179,13 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
         {PRICING_PLANS.map((plan) => {
           const price = formatPlanPrice(plan.id, currency, browserLocale);
           const selectedPriceId = localizedPricing.plans[plan.id].stripePriceId;
+
           console.log('locale =', language);
           console.log('currency =', localizedPricing.currency);
           console.log('planId =', plan.id);
           console.log('displayPrice =', price);
           console.log('stripePriceId =', selectedPriceId);
+
           const name = plan.id === 'test' ? t.testName : t.businessName;
           const description = plan.id === 'test' ? t.testDescription : t.businessDescription;
           const creditLabel = plan.credits === 2 ? t.credits2 : t.credits10;
@@ -167,17 +195,28 @@ export function PricingPlans({ session, onError }: PricingPlansProps) {
           return (
             <article key={plan.id} className={`pricing-card pricing-card-${plan.theme}`}>
               <div className="pricing-card-hero">
-                <span className="pricing-icon" aria-hidden="true">{iconForPlan(plan.id)}</span>
+                <span className="pricing-icon" aria-hidden="true">
+                  {iconForPlan(plan.id)}
+                </span>
                 <div>
-                  <p className="pricing-credit-count">{plan.credits} {language === 'ja' ? '回分' : 'Analyses'}</p>
+                  <p className="pricing-credit-count">
+                    {plan.credits} {language === 'ja' ? '回分' : 'Analyses'}
+                  </p>
                   <h3>{name}</h3>
                 </div>
               </div>
 
               <p className="pricing-description">{description}</p>
+
               <ul className="pricing-features">
-                <li><span aria-hidden="true">✓</span>{creditLabel}</li>
-                <li><span aria-hidden="true">✓</span>{validLabel}</li>
+                <li>
+                  <span aria-hidden="true">✓</span>
+                  {creditLabel}
+                </li>
+                <li>
+                  <span aria-hidden="true">✓</span>
+                  {validLabel}
+                </li>
               </ul>
 
               <div className="pricing-price">

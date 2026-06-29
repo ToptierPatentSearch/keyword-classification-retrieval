@@ -13,8 +13,8 @@ interface CheckoutRequest {
 const PLAN_CREDITS: Record<PlanId, number> = { test: 2, business: 10 };
 const PRICE_ENV: Record<PlanId, Record<Currency, string>> = {
   // Stripe Price ID mapping: values are read from secrets so no fake Price IDs are trusted or committed.
-  test: { usd: 'STRIPE_PRICE_TEST_USD', jpy: 'STRIPE_PRICE_TEST_JPY', eur: 'STRIPE_PRICE_TEST_EUR' },
-  business: { usd: 'STRIPE_PRICE_BUSINESS_USD', jpy: 'STRIPE_PRICE_BUSINESS_JPY', eur: 'STRIPE_PRICE_BUSINESS_EUR' },
+  test: { usd: 'STRIPE_PRICE_ID_TEST_USD', jpy: 'STRIPE_PRICE_ID_TEST_JPY', eur: 'STRIPE_PRICE_ID_TEST_EUR' },
+  business: { usd: 'STRIPE_PRICE_ID_BUSINESS_USD', jpy: 'STRIPE_PRICE_ID_BUSINESS_JPY', eur: 'STRIPE_PRICE_ID_BUSINESS_EUR' },
 };
 
 const corsHeaders = {
@@ -37,6 +37,27 @@ function getRequiredEnv(name: string): string {
   return value;
 }
 
+function getRequiredUrlEnv(name: string): string {
+  const rawValue = getRequiredEnv(name).trim();
+  try {
+    const url = new URL(rawValue);
+    if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+      throw new Error();
+    }
+    url.hash = '';
+    return url.toString();
+  } catch {
+    throw new Error(`${name} must be a valid absolute URL, for example https://toptierpatentsearch.github.io/keyword-classification-retrieval/`);
+  }
+}
+
+function buildSuccessUrl(siteUrl: string, planId: PlanId): string {
+  const url = new URL(siteUrl);
+  url.searchParams.set('checkout', 'success');
+  url.searchParams.set('purchasedPlan', planId);
+  return url.toString();
+}
+
 function getPlan(value: unknown): PlanId {
   if (value === 'test' || value === 'business') return value;
   throw new Error('planId must be "test" or "business".');
@@ -56,8 +77,6 @@ Deno.serve(async (request) => {
     const supabaseAnonKey = getRequiredEnv('SUPABASE_ANON_KEY');
     const supabaseServiceRoleKey = getRequiredEnv('SUPABASE_SERVICE_ROLE_KEY');
     const stripeSecretKey = getRequiredEnv('STRIPE_SECRET_KEY');
-    const defaultSuccessUrl = getRequiredEnv('STRIPE_CHECKOUT_SUCCESS_URL');
-    const defaultCancelUrl = getRequiredEnv('STRIPE_CHECKOUT_CANCEL_URL');
 
     const authHeader = request.headers.get('Authorization');
     if (!authHeader) return jsonResponse({ error: 'Missing Authorization header.' }, { status: 401 });
@@ -93,15 +112,21 @@ Deno.serve(async (request) => {
       await admin.from('stripe_customers').insert({ user_id: user.id, stripe_customer_id: customerId, email: user.email });
     }
 
-    const successUrl = `${defaultSuccessUrl}${defaultSuccessUrl.includes('?') ? '&' : '?'}checkout=success&purchasedPlan=${planId}`;
+    // Use the configured production app URL as the only redirect source.
+    // Do not trust the request Origin header here, because it can be localhost during tests
+    // and would make completed Stripe Checkout sessions return to http://localhost:5173.
+    const siteUrl = getRequiredUrlEnv('SITE_URL');
+    const successUrl = buildSuccessUrl(siteUrl, planId);
+    const cancelUrl = siteUrl;
     const metadata = { supabase_user_id: user.id, plan_id: planId, credits: String(expectedCredits), currency, price_id: priceId };
+
 
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
       customer: customerId,
       line_items: [{ price: priceId, quantity: 1 }],
       success_url: successUrl,
-      cancel_url: defaultCancelUrl,
+      cancel_url: cancelUrl,
       client_reference_id: user.id,
       metadata,
       payment_intent_data: { metadata },
@@ -117,7 +142,7 @@ Deno.serve(async (request) => {
       status: session.status,
       payment_status: session.payment_status,
       success_url: successUrl,
-      cancel_url: defaultCancelUrl,
+      cancel_url: cancelUrl,
       allow_promotion_codes: false,
       metadata,
     });

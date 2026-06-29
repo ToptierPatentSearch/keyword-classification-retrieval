@@ -30,13 +30,20 @@ export function getRegionFromLocale(locale: string): string | null {
 }
 
 export function detectCurrency(languages = getBrowserLanguages()): SupportedCurrency {
-  const regions = languages.map(getRegionFromLocale).filter((region): region is string => Boolean(region));
+  const normalizedLanguages = languages.map((language) => language.toLowerCase());
 
-  if (regions.includes('JP')) return 'jpy';
-  if (regions.includes('US')) return 'usd';
-  if (regions.some((region) => EUROZONE_REGIONS.has(region))) return 'eur';
+  if (normalizedLanguages.some((language) => language === 'ja' || language.startsWith('ja-'))) {
+    return 'jpy';
+  }
 
-  // Currency fallback: unsupported or region-less locales display and request USD.
+  const regions = languages
+    .map(getRegionFromLocale)
+    .filter((region): region is string => Boolean(region));
+
+  if (regions.some((region) => EUROZONE_REGIONS.has(region))) {
+    return 'eur';
+  }
+
   return 'usd';
 }
 

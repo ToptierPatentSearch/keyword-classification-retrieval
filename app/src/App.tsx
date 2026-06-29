@@ -42,7 +42,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [error, setError] = useState('');
-
+  const [creditRefreshKey, setCreditRefreshKey] = useState(0);
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
@@ -112,7 +112,7 @@ export default function App() {
     setResult(null);
 
     try {
-      const { data, error: functionError } = await supabase.functions.invoke<AnalysisResult>("openai-proxy", {
+      const { data, error: functionError } = await supabase.functions.invoke<AnalysisResult>("analyze", {
         body: { input: text },
       });
 
@@ -125,6 +125,7 @@ export default function App() {
       }
 
       setResult(data);
+      setCreditRefreshKey((key) => key + 1);
     } catch (analyzeError) {
       setError(asErrorMessage(analyzeError));
     } finally {
@@ -208,7 +209,11 @@ export default function App() {
           <button type="button" className="secondary" onClick={handleSignOut}>Sign out</button>
         </div>
       </header>
-      <PricingPlans session={session} onError={setError} />
+      <PricingPlans
+        session={session}
+        onError={setError}
+        refreshKey={creditRefreshKey}
+      />
       <section className="card input-card">
         <div className="section-heading">
           <h2>Patent text</h2>

@@ -45,7 +45,7 @@ export const LOCALIZED_PRICING: Record<SupportedCurrency, LocalizedPricing> = {
     symbol: '¥',
     plans: {
       test: { label: 'テストパック', amount: 500, stripePriceId: stripePriceId('VITE_STRIPE_PRICE_TEST_JPY') },
-      business: { label: 'ビジネスパック', amount: 1500, stripePriceId: stripePriceId('VITE_STRIPE_PRICE_BUSINESS_JPY') },
+      business: { label: 'ビジネスパック', amount: 2000, stripePriceId: stripePriceId('VITE_STRIPE_PRICE_BUSINESS_JPY') },
     },
   },
   eur: {

@@ -268,25 +268,40 @@ Deno.serve(async (request) => {
     const text = validateText(body);
     const result = await analyzePatentText(text, apiKey);
 
-    const { error: consumeError } = await adminClient.rpc('consume_analysis_credit', {
+    const { data: consumed, error: consumeError } = await adminClient.rpc(
+    'consume_analysis_credit',
+    {
       p_user_id: user.id,
-    });
-
-    if (consumeError) {
-      return jsonResponse({ error: consumeError.message }, { status: 500 });
     }
+  );
+
+  if (consumeError) {
+    return jsonResponse({ error: consumeError.message }, { status: 500 });
+  }
+
+  if (!consumed) {
+    return jsonResponse(
+      {
+        error: NO_CREDITS_MESSAGE,
+        remainingCredits: 0,
+      },
+      { status: 402 }
+    );
+  }
 
     const { data: updatedCreditRow, error: updatedCreditError } = await adminClient
-      .from('user_credit_balances')
-      .select('"remaining credits"')
-      .eq('user_id', user.id)
-      .single();
+    .from('user_credit_balances')
+    .select('remaining_credits')
+    .eq('user_id', user.id)
+    .single();
 
     if (updatedCreditError) {
       return jsonResponse({ error: updatedCreditError.message }, { status: 500 });
     }
-
-    const remainingCredits = Number(updatedCreditRow?.remaining_credits ?? 0);
+    const remainingCredits = Number(
+      updatedCreditRow?.remaining_credits ?? 0
+    );
+    
 
     return jsonResponse({
       ...result,

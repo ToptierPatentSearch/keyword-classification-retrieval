@@ -52,13 +52,31 @@ Deno.serve(async (request) => {
         metadata: session.metadata ?? {},
       }, { onConflict: 'stripe_checkout_session_id' });
 
-      await admin.rpc('grant_analysis_credits', {
+      const { error: grantError } = await admin.rpc('grant_analysis_credits', {
         p_user_id: userId,
         p_credits: credits,
         p_plan_id: planId,
         p_stripe_checkout_session_id: session.id,
-        p_stripe_payment_intent_id: typeof session.payment_intent === 'string' ? session.payment_intent : null,
+        p_stripe_payment_intent_id:
+          typeof session.payment_intent === 'string'
+            ? session.payment_intent
+            : null,
       });
+
+      if (grantError) {
+        console.error('grant_analysis_credits failed:', grantError);
+
+        return new Response(
+          JSON.stringify({
+            error: 'Credit grant failed',
+            detail: grantError.message,
+          }),
+          {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      }
     }
   }
 

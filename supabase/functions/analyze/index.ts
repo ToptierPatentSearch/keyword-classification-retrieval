@@ -40,7 +40,8 @@ const MAX_INPUT_CHARS = 50000;
 const LONG_INPUT_WARNING_CHARS = 12000;
 const MODEL = Deno.env.get('OPENAI_MODEL') ?? 'gpt-4.1-mini';
 
-const NO_CREDITS_MESSAGE = '分析クレジットがありません。Test pack または Business pack を購入してください。';
+const NO_CREDITS_MESSAGE =
+  '分析クレジットがありません。Test pack または Business pack を購入してください。';
 
 const responseSchema = {
   type: 'object',
@@ -272,6 +273,7 @@ Deno.serve(async (request) => {
     'consume_analysis_credit',
     {
       p_user_id: user.id,
+      p_source: 'analysis',
     }
   );
 
@@ -307,14 +309,16 @@ Deno.serve(async (request) => {
       ...result,
       remainingCredits,
     });
-  } catch (error) {
-    const message =
-      error instanceof Error
-        ? error.message
-        : 'Failed to analyze patent text.';
+ } catch (error) {
+  console.error('Analyze Edge Function failed:', error);
 
-    const status = message.includes('too long') ? 413 : 400;
+  const message =
+    error instanceof Error
+      ? error.message
+      : 'Failed to analyze patent text.';
 
-    return jsonResponse({ error: message }, { status });
-  }
+  const status = message.includes('too long') ? 413 : 400;
+
+  return jsonResponse({ error: message }, { status });
+}
 });

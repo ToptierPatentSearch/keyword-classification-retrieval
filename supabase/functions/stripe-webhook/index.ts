@@ -52,24 +52,102 @@ Deno.serve(async (request) => {
         metadata: session.metadata ?? {},
       }, { onConflict: 'stripe_checkout_session_id' });
 
-      const { error: grantError } = await admin.rpc('grant_analysis_credits', {
-        p_user_id: userId,
-        p_credits: credits,
-        p_plan_id: planId,
-        p_stripe_checkout_session_id: session.id,
-        p_stripe_payment_intent_id:
-          typeof session.payment_intent === 'string'
-            ? session.payment_intent
-            : null,
-      });
+      const { data: updatedBalance, error: balanceError } = await admin
+        .from('user_credit_balances')
+        .upsert(
+          {
+            user_id: userId,
+            remaining_credits: credits,
+            updated_at: new Date().toISOString(),
+          },
+          {
+            onConflict: 'user_id',
+          }
+        )
+        .select('user_id, remaining_credits')
+        .single();
 
-      if (grantError) {
-        console.error('grant_analysis_credits failed:', grantError);
+      if (balanceError) {
+        console.error('Failed to upsert credit balance:', balanceError);
 
         return new Response(
           JSON.stringify({
-            error: 'Credit grant failed',
-            detail: grantError.message,
+            error: 'Credit balance update failed',
+            detail: balanceError.message,
+          }),
+          {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      }
+
+      const { data: currentBalanceRow, error: currentBalanceError } = await admin
+        .from('user_credit_balances')
+        .select('remaining_credits')
+        .eq('user_id', userId)
+        .single();
+
+      if (currentBalanceError) {
+        console.error('Failed to read current balance:', currentBalanceError);
+
+        return new Response(
+          JSON.stringify({
+            error: 'Credit balance read failed',
+            detail: currentBalanceError.message,
+          }),
+          {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      }
+
+      const currentBalance = Number(currentBalanceRow?.remaining_credits ?? 0);
+      const correctedBalance = currentBalance + credits;
+
+      const { data: finalBalanceRow, error: finalBalanceError } = await admin
+        .from('user_credit_balances')
+        .update({
+          remaining_credits: correctedBalance,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('user_id', userId)
+        .select('remaining_credits')
+        .single();
+
+      if (finalBalanceError) {
+        console.error('Failed to increment credit balance:', finalBalanceError);
+
+        return new Response(
+          JSON.stringify({
+            error: 'Credit increment failed',
+            detail: finalBalanceError.message,
+          }),
+          {
+            status: 500,
+            headers: { 'Content-Type': 'application/json' },
+          }
+        );
+      }
+
+      const { error: transactionError } = await admin
+        .from('analysis_credit_transactions')
+        .insert({
+          user_id: userId,
+          delta: credits,
+          balance_after: finalBalanceRow.remaining_credits,
+          source: 'stripe_checkout',
+          stripe_session_id: session.id,
+        });
+
+      if (transactionError) {
+        console.error('Failed to insert credit transaction:', transactionError);
+
+        return new Response(
+          JSON.stringify({
+            error: 'Credit transaction insert failed',
+            detail: transactionError.message,
           }),
           {
             status: 500,

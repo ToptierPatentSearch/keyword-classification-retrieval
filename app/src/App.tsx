@@ -117,7 +117,35 @@ export default function App() {
       });
 
       if (functionError) {
-        throw functionError;
+        const response = (functionError as unknown as { context?: Response }).context;
+        let errorBody: {
+          error?: string;
+          message?: string;
+          remainingCredits?: number;
+        } | null = null;
+
+        if (response) {
+          try {
+            errorBody = await response.clone().json();
+          } catch {
+            errorBody = null;
+          }
+        }
+
+        const returnedCredits = Number(errorBody?.remainingCredits);
+
+        if (response?.status === 402 || returnedCredits === 0) {
+          setError('');
+          setResult(null);
+          setCreditRefreshKey((key) => key + 1);
+          return;
+        }
+
+        throw new Error(
+          errorBody?.error ??
+            errorBody?.message ??
+            functionError.message
+        );
       }
 
       if (!data) {
@@ -126,10 +154,10 @@ export default function App() {
 
       setResult(data);
       setCreditRefreshKey((key) => key + 1);
-    } catch (analyzeError) {
-      setError(asErrorMessage(analyzeError));
-    } finally {
-      setLoading(false);
+      } catch (analyzeError) {
+        setError(asErrorMessage(analyzeError));
+      } finally {
+        setLoading(false);
     }
   }
 

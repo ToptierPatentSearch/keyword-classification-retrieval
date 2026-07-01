@@ -260,6 +260,16 @@ export default function App() {
           refreshKey={creditRefreshKey}
         />
       )}
+
+      {result && remainingCreditsAfterAnalysis !== null && (
+        <section className="card">
+          <p className="eyebrow">利用可能な分析回数</p>
+          <p className="remaining-credits">
+            残り分析回数: <strong>{remainingCreditsAfterAnalysis}回</strong>
+          </p>
+        </section>
+      )}
+
       <section className="card input-card">
         <div className="section-heading">
           <h2>Patent text</h2>
@@ -290,11 +300,7 @@ export default function App() {
               <h2>Results</h2>
               <p className="muted">Detected language: <strong>{result.language}</strong></p>
 
-              {remainingCreditsAfterAnalysis !== null && (
-                <p className="muted">
-                  Remaining credits: <strong>{remainingCreditsAfterAnalysis}</strong>
-                </p>
-              )}
+
 
             </div>
             <button className="primary" type="button" onClick={handleDownloadPdf} disabled={!Array.isArray(result.keywords) || result.keywords.length === 0 || pdfLoading}>

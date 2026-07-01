@@ -52,8 +52,8 @@ Deno.serve(async (request) => {
         metadata: session.metadata ?? {},
       }, { onConflict: 'stripe_checkout_session_id' });
 
-      const { data: updatedBalance, error: balanceError } = await admin
-        .from('user_credit_balances')
+    const { error: balanceError } = await admin
+      .from('user_credit_balances')
         .upsert(
           {
             user_id: userId,
@@ -82,46 +82,18 @@ Deno.serve(async (request) => {
         );
       }
 
-      const { data: currentBalanceRow, error: currentBalanceError } = await admin
-        .from('user_credit_balances')
-        .select('remaining_credits')
-        .eq('user_id', userId)
-        .single();
-
-      if (currentBalanceError) {
-        console.error('Failed to read current balance:', currentBalanceError);
-
-        return new Response(
-          JSON.stringify({
-            error: 'Credit balance read failed',
-            detail: currentBalanceError.message,
-          }),
-          {
-            status: 500,
-            headers: { 'Content-Type': 'application/json' },
-          }
-        );
-      }
-
-      const currentBalance = Number(currentBalanceRow?.remaining_credits ?? 0);
-      const correctedBalance = currentBalance + credits;
-
       const { data: finalBalanceRow, error: finalBalanceError } = await admin
         .from('user_credit_balances')
-        .update({
-          remaining_credits: correctedBalance,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('user_id', userId)
         .select('remaining_credits')
+        .eq('user_id', userId)
         .single();
 
       if (finalBalanceError) {
-        console.error('Failed to increment credit balance:', finalBalanceError);
+        console.error('Failed to read final balance:', finalBalanceError);
 
         return new Response(
           JSON.stringify({
-            error: 'Credit increment failed',
+            error: 'Final credit balance read failed',
             detail: finalBalanceError.message,
           }),
           {
@@ -131,33 +103,23 @@ Deno.serve(async (request) => {
         );
       }
 
-      const { error: transactionError } = await admin
-        .from('analysis_credit_transactions')
-        .insert({
-          user_id: userId,
-          delta: credits,
-          balance_after: finalBalanceRow.remaining_credits,
-          source: 'stripe_checkout',
-          stripe_session_id: session.id,
-        });
-
-      if (transactionError) {
-        console.error('Failed to insert credit transaction:', transactionError);
-
-        return new Response(
-          JSON.stringify({
-            error: 'Credit transaction insert failed',
-            detail: transactionError.message,
-          }),
-          {
-            status: 500,
-            headers: { 'Content-Type': 'application/json' },
-          }
-        );
-      }
-    }
+      console.log('credit grant completed', {
+        stripe_event_id: event.id,
+        stripe_session_id: session.id,
+        user_id: userId,
+        plan_id: planId,
+        delta: credits,
+        balance_after: finalBalanceRow?.remaining_credits,
+        source: 'stripe_checkout',
+      });
+    }      
   }
 
-  await admin.from('stripe_webhook_events').update({ processed_at: new Date().toISOString() }).eq('stripe_event_id', event.id);
-  return new Response(JSON.stringify({ received: true }), { headers: { 'Content-Type': 'application/json' } });
+  await admin
+    .from('stripe_webhook_events')
+    .update({ processed_at: new Date().toISOString() })
+    .eq('stripe_event_id', event.id);
+  return new Response(JSON.stringify({ received: true }), { 
+    headers: { 'Content-Type': 'application/json' } 
+  });
 });

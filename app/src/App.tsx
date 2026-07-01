@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from './supabaseClient';
 import type { AnalysisResult } from './types';
@@ -43,6 +43,8 @@ export default function App() {
   const [pdfLoading, setPdfLoading] = useState(false);
   const [error, setError] = useState('');
   const [creditRefreshKey, setCreditRefreshKey] = useState(0);
+  const [remainingCreditsAfterAnalysis, setRemainingCreditsAfterAnalysis] = useState<number | null>(null);
+  const analyzeInFlightRef = useRef(false);
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
@@ -97,6 +99,10 @@ export default function App() {
     }
   }
   async function handleAnalyze() {
+    if (analyzeInFlightRef.current || loading) {
+      return;
+    }
+
     if (!session) {
       setError('Please sign in before analyzing patent text.');
       return;
@@ -107,17 +113,22 @@ export default function App() {
       return;
     }
 
+    analyzeInFlightRef.current = true;
     setLoading(true);
     setError('');
     setResult(null);
+    setRemainingCreditsAfterAnalysis(null);
 
     try {
-      const { data, error: functionError } = await supabase.functions.invoke<AnalysisResult>("analyze", {
+      const { data, error: functionError } = await supabase.functions.invoke<
+        AnalysisResult & { remainingCredits?: number }
+      >('analyze', {
         body: { input: text },
       });
 
       if (functionError) {
         const response = (functionError as unknown as { context?: Response }).context;
+
         let errorBody: {
           error?: string;
           message?: string;
@@ -132,19 +143,18 @@ export default function App() {
           }
         }
 
-        const returnedCredits = Number(errorBody?.remainingCredits);
-
-        if (response?.status === 402 || returnedCredits === 0) {
+        if (response?.status === 402) {
           setError('');
           setResult(null);
+          setRemainingCreditsAfterAnalysis(0);
           setCreditRefreshKey((key) => key + 1);
           return;
         }
 
         throw new Error(
           errorBody?.error ??
-            errorBody?.message ??
-            functionError.message
+          errorBody?.message ??
+          functionError.message
         );
       }
 
@@ -153,14 +163,20 @@ export default function App() {
       }
 
       setResult(data);
-      setCreditRefreshKey((key) => key + 1);
-      } catch (analyzeError) {
-        setError(asErrorMessage(analyzeError));
-      } finally {
-        setLoading(false);
-    }
-  }
 
+      if (typeof data.remainingCredits === 'number') {
+        setRemainingCreditsAfterAnalysis(data.remainingCredits);
+      }
+
+      setCreditRefreshKey((key) => key + 1);
+    } catch (analyzeError) {
+      setError(asErrorMessage(analyzeError));
+    } finally {
+      analyzeInFlightRef.current = false;
+      setLoading(false);
+    }
+
+  }
   async function handleDownloadPdf() {
     if (!result) {
       return;
@@ -237,11 +253,13 @@ export default function App() {
           <button type="button" className="secondary" onClick={handleSignOut}>Sign out</button>
         </div>
       </header>
-      <PricingPlans
-        session={session}
-        onError={setError}
-        refreshKey={creditRefreshKey}
-      />
+      {!result && !loading && (
+        <PricingPlans
+          session={session}
+          onError={setError}
+          refreshKey={creditRefreshKey}
+        />
+      )}
       <section className="card input-card">
         <div className="section-heading">
           <h2>Patent text</h2>
@@ -271,6 +289,13 @@ export default function App() {
             <div>
               <h2>Results</h2>
               <p className="muted">Detected language: <strong>{result.language}</strong></p>
+
+              {remainingCreditsAfterAnalysis !== null && (
+                <p className="muted">
+                  Remaining credits: <strong>{remainingCreditsAfterAnalysis}</strong>
+                </p>
+              )}
+
             </div>
             <button className="primary" type="button" onClick={handleDownloadPdf} disabled={!Array.isArray(result.keywords) || result.keywords.length === 0 || pdfLoading}>
               {pdfLoading ? 'Preparing PDF…' : 'Download PDF'}

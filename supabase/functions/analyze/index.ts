@@ -97,9 +97,11 @@ function jsonResponse(body: unknown, init: ResponseInit = {}) {
 
 function getRequiredEnv(name: string): string {
   const value = Deno.env.get(name);
+
   if (!value) {
     throw new Error(`${name} is not configured in Supabase secrets.`);
   }
+
   return value;
 }
 
@@ -107,16 +109,19 @@ function validateText(body: AnalyzeRequest): string {
   const rawText = typeof body.text === 'string' ? body.text : body.input;
 
   if (typeof rawText !== 'string') {
-    throw new Error('Request body must include a string field named "text".');
+    throw new Error('Request body must include a string field named "text" or "input".');
   }
 
   const text = rawText.trim();
+
   if (!text) {
     throw new Error('Text must not be empty.');
   }
 
   if (text.length > MAX_INPUT_CHARS) {
-    throw new Error(`Text is too long. Limit input to ${MAX_INPUT_CHARS.toLocaleString()} characters or chunk it before calling analyze.`);
+    throw new Error(
+      `Text is too long. Limit input to ${MAX_INPUT_CHARS.toLocaleString()} characters or chunk it before calling analyze.`
+    );
   }
 
   return text;
@@ -145,9 +150,10 @@ function normalizeResult(result: AnalysisResult, warning?: string): AnalysisResu
 
 async function analyzePatentText(text: string, apiKey: string): Promise<AnalysisResult> {
   const client = new OpenAI({ apiKey });
-  const warning = text.length > LONG_INPUT_WARNING_CHARS
-    ? 'Long input detected. The model analyzed the provided text in one pass; for production-scale documents, chunking can improve recall and cost control.'
-    : undefined;
+  const warning =
+    text.length > LONG_INPUT_WARNING_CHARS
+      ? 'Long input detected. The model analyzed the provided text in one pass; for production-scale documents, chunking can improve recall and cost control.'
+      : undefined;
 
   const response = await client.responses.create({
     model: MODEL,
@@ -193,6 +199,7 @@ Tasks:
   });
 
   const outputText = response.output_text;
+
   if (!outputText) {
     throw new Error('OpenAI returned an empty response.');
   }
@@ -222,6 +229,7 @@ Deno.serve(async (request) => {
     const supabaseServiceRoleKey = getRequiredEnv('SUPABASE_SERVICE_ROLE_KEY');
 
     const authHeader = request.headers.get('Authorization');
+
     if (!authHeader) {
       return jsonResponse({ error: 'Authentication required.' }, { status: 401 });
     }
@@ -254,71 +262,76 @@ Deno.serve(async (request) => {
       .from('user_credit_balances')
       .select('remaining_credits')
       .eq('user_id', user.id)
-      .single();
+      .maybeSingle();
 
     if (creditError) {
       return jsonResponse({ error: creditError.message }, { status: 500 });
     }
 
     const currentCredits = Number(creditRow?.remaining_credits ?? 0);
+
     if (!Number.isFinite(currentCredits) || currentCredits <= 0) {
-      return jsonResponse({ error: NO_CREDITS_MESSAGE, remainingCredits: 0 }, { status: 402 });
+      return jsonResponse(
+        {
+          error: NO_CREDITS_MESSAGE,
+          remainingCredits: 0,
+        },
+        { status: 402 }
+      );
     }
 
-    const body = await request.json() as AnalyzeRequest;
+    const body = (await request.json()) as AnalyzeRequest;
     const text = validateText(body);
     const result = await analyzePatentText(text, apiKey);
 
     const { data: consumed, error: consumeError } = await adminClient.rpc(
-    'consume_analysis_credit',
-    {
-      p_user_id: user.id,
-      p_source: 'analysis',
-    }
-  );
-
-  if (consumeError) {
-    return jsonResponse({ error: consumeError.message }, { status: 500 });
-  }
-
-  if (!consumed) {
-    return jsonResponse(
+      'consume_analysis_credit',
       {
-        error: NO_CREDITS_MESSAGE,
-        remainingCredits: 0,
-      },
-      { status: 402 }
+        p_user_id: user.id,
+        p_source: 'analysis',
+      }
     );
-  }
+
+    if (consumeError) {
+      return jsonResponse({ error: consumeError.message }, { status: 500 });
+    }
+
+    if (!consumed) {
+      return jsonResponse(
+        {
+          error: NO_CREDITS_MESSAGE,
+          remainingCredits: 0,
+        },
+        { status: 402 }
+      );
+    }
 
     const { data: updatedCreditRow, error: updatedCreditError } = await adminClient
-    .from('user_credit_balances')
-    .select('remaining_credits')
-    .eq('user_id', user.id)
-    .single();
+      .from('user_credit_balances')
+      .select('remaining_credits')
+      .eq('user_id', user.id)
+      .maybeSingle();
 
     if (updatedCreditError) {
       return jsonResponse({ error: updatedCreditError.message }, { status: 500 });
     }
-    const remainingCredits = Number(
-      updatedCreditRow?.remaining_credits ?? 0
-    );
-    
+
+    const remainingCredits = Number(updatedCreditRow?.remaining_credits ?? 0);
 
     return jsonResponse({
       ...result,
-      remainingCredits,
+      remainingCredits: Number.isFinite(remainingCredits) ? remainingCredits : 0,
     });
- } catch (error) {
-  console.error('Analyze Edge Function failed:', error);
+  } catch (error) {
+    console.error('Analyze Edge Function failed:', error);
 
-  const message =
-    error instanceof Error
-      ? error.message
-      : 'Failed to analyze patent text.';
+    const message =
+      error instanceof Error
+        ? error.message
+        : 'Failed to analyze patent text.';
 
-  const status = message.includes('too long') ? 413 : 400;
+    const status = message.includes('too long') ? 413 : 400;
 
-  return jsonResponse({ error: message }, { status });
-}
+    return jsonResponse({ error: message }, { status });
+  }
 });

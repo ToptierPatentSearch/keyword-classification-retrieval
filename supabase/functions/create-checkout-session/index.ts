@@ -124,7 +124,14 @@ Deno.serve(async (request) => {
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
       customer: customerId,
+
       automatic_tax: { enabled: true },
+      billing_address_collection: 'required',
+      customer_update: {
+        address: 'auto',
+        name: 'auto',
+      },
+
       line_items: [{ price: priceId, quantity: 1 }],
       success_url: successUrl,
       cancel_url: cancelUrl,
@@ -132,7 +139,6 @@ Deno.serve(async (request) => {
       metadata,
       payment_intent_data: { metadata },
     });
-
     await admin.from('stripe_checkout_sessions').insert({
       user_id: user.id,
       stripe_customer_id: customerId,

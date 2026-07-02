@@ -8,6 +8,7 @@ interface PricingPlansProps {
   session: Session | null;
   onError: (message: string) => void;
   refreshKey?: number;
+  onCreditsChange?: (credits: number) => void;
 }
 
 function asErrorMessage(error: unknown): string {
@@ -22,6 +23,7 @@ export function PricingPlans({
   session,
   onError,
   refreshKey,
+  onCreditsChange,
 }: PricingPlansProps) {
   const browserLocale =
     typeof navigator === 'undefined'
@@ -37,9 +39,15 @@ export function PricingPlans({
   const [remainingCredits, setRemainingCredits] = useState<number | null>(null);
   const [balanceLoading, setBalanceLoading] = useState(false);
 
+  function applyCredits(credits: number) {
+    const safeCredits = Number.isFinite(credits) ? credits : 0;
+    setRemainingCredits(safeCredits);
+    onCreditsChange?.(safeCredits);
+  }
+
   async function fetchRemainingCredits() {
     if (!session) {
-      setRemainingCredits(0);
+      applyCredits(0);
       return;
     }
 
@@ -61,10 +69,10 @@ export function PricingPlans({
       console.log('Credit balance row:', data);
       console.log('remainingCredits =', credits);
 
-      setRemainingCredits(credits);
+      applyCredits(credits);
     } catch (error) {
       onError(`${t.checkoutError} ${asErrorMessage(error)}`);
-      setRemainingCredits(0);
+      applyCredits(0);
     } finally {
       setBalanceLoading(false);
     }
@@ -134,38 +142,16 @@ export function PricingPlans({
 
   if (balanceLoading || remainingCredits === null) {
     return (
-      <section className="pricing-section" aria-labelledby="pricing-heading">
-        <div className="pricing-heading">
-          <h2 id="pricing-heading">{t.heading}</h2>
-          <p>{t.description}</p>
-        </div>
-        <div className="current-plan-card">
-          {language === 'ja' ? '読み込み中...' : 'Loading...'}
-        </div>
+      <section className="card">
+        <p className="muted">
+          {language === 'ja' ? '残り分析回数を確認中...' : 'Loading remaining analyses...'}
+        </p>
       </section>
     );
   }
 
   if (remainingCredits > 0) {
-    return (
-      <section className="pricing-section" aria-labelledby="pricing-heading">
-        <div className="pricing-heading">
-          <h2 id="pricing-heading">{t.heading}</h2>
-          <p>{t.description}</p>
-        </div>
-
-        <article className="current-plan-card">
-          <p className="current-plan-title">
-            {language === 'ja' ? '利用可能な分析回数' : 'Available Analyses'}
-          </p>
-          <p className="remaining-credits">
-            {language === 'ja'
-              ? `残り分析回数: ${remainingCredits}回`
-              : `Remaining analyses: ${remainingCredits}`}
-          </p>
-        </article>
-      </section>
-    );
+    return null;
   }
 
   return (

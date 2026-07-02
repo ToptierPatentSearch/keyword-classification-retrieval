@@ -44,6 +44,7 @@ export default function App() {
   const [error, setError] = useState('');
   const [creditRefreshKey, setCreditRefreshKey] = useState(0);
   const [remainingCreditsAfterAnalysis, setRemainingCreditsAfterAnalysis] = useState<number | null>(null);
+  const [remainingCredits, setRemainingCredits] = useState<number | null>(null);
   const analyzeInFlightRef = useRef(false);
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -71,7 +72,9 @@ export default function App() {
     () => estimateResultTime(text.trim().length),
     [text],
   );
-
+  const creditsLoaded = typeof remainingCredits === 'number';
+  const hasCredits = creditsLoaded && remainingCredits > 0;
+  const noCredits = creditsLoaded && remainingCredits <= 0;
   async function handleAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError('');
@@ -147,6 +150,7 @@ export default function App() {
           setError('');
           setResult(null);
           setRemainingCreditsAfterAnalysis(0);
+          setRemainingCredits(0);
           setCreditRefreshKey((key) => key + 1);
           return;
         }
@@ -166,8 +170,8 @@ export default function App() {
 
       if (typeof data.remainingCredits === 'number') {
         setRemainingCreditsAfterAnalysis(data.remainingCredits);
+        setRemainingCredits(data.remainingCredits);
       }
-
       setCreditRefreshKey((key) => key + 1);
     } catch (analyzeError) {
       setError(asErrorMessage(analyzeError));
@@ -253,44 +257,46 @@ export default function App() {
           <button type="button" className="secondary" onClick={handleSignOut}>Sign out</button>
         </div>
       </header>
-      {!result && !loading && (
+      {!hasCredits && !loading && (
         <PricingPlans
           session={session}
           onError={setError}
           refreshKey={creditRefreshKey}
+          onCreditsChange={setRemainingCredits}
         />
       )}
 
-      {result && remainingCreditsAfterAnalysis !== null && (
+      {hasCredits && (
         <section className="card">
           <p className="eyebrow">利用可能な分析回数</p>
           <p className="remaining-credits">
-            残り分析回数: <strong>{remainingCreditsAfterAnalysis}回</strong>
+            残り分析回数: <strong>{remainingCredits}回</strong>
           </p>
         </section>
       )}
 
-      <section className="card input-card">
-        <div className="section-heading">
-          <h2>Patent text</h2>
-          <span>{text.length.toLocaleString()} characters</span>
-        </div>
-        <textarea
-          value={text}
-          onChange={(event) => setText(event.target.value)}
-          placeholder="Paste English or Japanese patent claims, abstracts, or descriptions…"
-          spellCheck={false}
-        />
-        <p className="estimate">{estimatedResultTime}</p>
-        <div className="actions">
-          <button className="primary" type="button" onClick={handleAnalyze} disabled={loading}>
-            {loading ? 'Analyzing…' : 'Analyze'}
-          </button>
-          <button className="secondary" type="button" onClick={() => setText('')} disabled={loading}>Clear</button>
-        </div>
-        {error && <p className="error">{error}</p>}
-      </section>
-
+      {hasCredits && (
+        <section className="card input-card">
+          <div className="section-heading">
+            <h2>Patent text</h2>
+            <span>{text.length.toLocaleString()} characters</span>
+          </div>
+          <textarea
+            value={text}
+            onChange={(event) => setText(event.target.value)}
+            placeholder="Paste English or Japanese patent claims, abstracts, or descriptions…"
+            spellCheck={false}
+          />
+          <p className="estimate">{estimatedResultTime}</p>
+          <div className="actions">
+            <button className="primary" type="button" onClick={handleAnalyze} disabled={loading || !hasCredits}>
+              {loading ? 'Analyzing…' : 'Analyze'}
+            </button>
+            <button className="secondary" type="button" onClick={() => setText('')} disabled={loading}>Clear</button>
+          </div>
+          {error && <p className="error">{error}</p>}
+        </section>
+      )}
       {loading && <p className="status-card">Analyzing text securely through Supabase Edge Functions… {estimatedResultTime}</p>}
 
       {result && (

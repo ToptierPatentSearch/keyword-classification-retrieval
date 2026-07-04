@@ -82,10 +82,16 @@ export default function App() {
     setAuthLoading(true);
 
     try {
-      const { error: authError } = authMode === 'sign-in'
+      const { error: authError } = 
+        authMode === 'sign-in'
         ? await supabase.auth.signInWithPassword({ email, password })
-        : await supabase.auth.signUp({ email, password });
-
+        : await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            emailRedirectTo: `${window.location.origin}/keyword-classification-retrieval/`,
+          },
+        });
       if (authError) {
         throw authError;
       }

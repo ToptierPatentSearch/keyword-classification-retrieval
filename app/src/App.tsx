@@ -74,7 +74,9 @@ export default function App() {
   );
   const creditsLoaded = typeof remainingCredits === 'number';
   const hasCredits = creditsLoaded && remainingCredits > 0;
-  const noCredits = creditsLoaded && remainingCredits <= 0;
+  const noCredits = !creditsLoaded || remainingCredits <= 0;
+  const showPurchaseCards = noCredits && !loading && !result;
+  const showInputCard = hasCredits || result !== null;
   async function handleAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError('');
@@ -82,16 +84,16 @@ export default function App() {
     setAuthLoading(true);
 
     try {
-      const { error: authError } = 
+      const { error: authError } =
         authMode === 'sign-in'
-        ? await supabase.auth.signInWithPassword({ email, password })
-        : await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            emailRedirectTo: `${window.location.origin}/keyword-classification-retrieval/`,
-          },
-        });
+          ? await supabase.auth.signInWithPassword({ email, password })
+          : await supabase.auth.signUp({
+            email,
+            password,
+            options: {
+              emailRedirectTo: `${window.location.origin}/keyword-classification-retrieval/`,
+            },
+          });
       if (authError) {
         throw authError;
       }
@@ -174,11 +176,8 @@ export default function App() {
 
       setResult(data);
 
-      if (typeof data.remainingCredits === 'number') {
-        setRemainingCreditsAfterAnalysis(data.remainingCredits);
-        setRemainingCredits(data.remainingCredits);
-      }
-      setCreditRefreshKey((key) => key + 1);
+      setRemainingCreditsAfterAnalysis(0);
+      setRemainingCredits(0);
     } catch (analyzeError) {
       setError(asErrorMessage(analyzeError));
     } finally {
@@ -186,6 +185,13 @@ export default function App() {
       setLoading(false);
     }
 
+  }
+  function handleClear() {
+    setText('');
+    setResult(null);
+    setError('');
+    setRemainingCreditsAfterAnalysis(null);
+    setRemainingCredits(0);
   }
   async function handleDownloadPdf() {
     if (!result) {
@@ -263,7 +269,7 @@ export default function App() {
           <button type="button" className="secondary" onClick={handleSignOut}>Sign out</button>
         </div>
       </header>
-      {!hasCredits && !loading && (
+      {showPurchaseCards && (
         <PricingPlans
           session={session}
           onError={setError}
@@ -271,7 +277,6 @@ export default function App() {
           onCreditsChange={setRemainingCredits}
         />
       )}
-
       {hasCredits && (
         <section className="card">
           <p className="eyebrow">利用可能な分析回数</p>
@@ -281,7 +286,7 @@ export default function App() {
         </section>
       )}
 
-      {hasCredits && (
+      {showInputCard && (
         <section className="card input-card">
           <div className="section-heading">
             <h2>Patent text</h2>
@@ -298,13 +303,19 @@ export default function App() {
             <button className="primary" type="button" onClick={handleAnalyze} disabled={loading || !hasCredits}>
               {loading ? 'Analyzing…' : 'Analyze'}
             </button>
-            <button className="secondary" type="button" onClick={() => setText('')} disabled={loading}>Clear</button>
+            <button className="secondary" type="button" onClick={handleClear} disabled={loading}>
+              Clear
+            </button>
           </div>
           {error && <p className="error">{error}</p>}
         </section>
       )}
-      {loading && <p className="status-card">Analyzing text securely through Supabase Edge Functions… {estimatedResultTime}</p>}
 
+      {loading && (
+        <p className="status-card">
+          Analyzing text securely through Supabase Edge Functions… {estimatedResultTime}
+        </p>
+      )}
       {result && (
         <section className="card results-card">
           <div className="section-heading">

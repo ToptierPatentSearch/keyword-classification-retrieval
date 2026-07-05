@@ -36,8 +36,13 @@ const corsHeaders = {
   'Access-Control-Max-Age': '86400',
 };
 
-const MAX_INPUT_CHARS = 50000;
-const LONG_INPUT_WARNING_CHARS = 12000;
+const MIN_INPUT_CHARS = 20;
+const MAX_INPUT_CHARS = 10000;
+const MAX_INPUT_LINES = 300;
+const MAX_REPEATED_CHAR_RUN = 20;
+const MIN_MEANINGFUL_CHAR_RATIO = 0.35;
+const MAX_DUPLICATE_WORD_RATIO = 0.75;
+const LONG_INPUT_WARNING_CHARS = 8000;
 const MODEL = Deno.env.get('OPENAI_MODEL') ?? 'gpt-4.1-mini';
 
 const NO_CREDITS_MESSAGE =
@@ -114,14 +119,57 @@ function validateText(body: AnalyzeRequest): string {
 
   const text = rawText.trim();
 
-  if (!text) {
-    throw new Error('Text must not be empty.');
+  if (text.length < MIN_INPUT_CHARS) {
+    throw new Error(
+      `Text is too short. Please enter at least ${MIN_INPUT_CHARS} characters of meaningful technical text.`
+    );
   }
 
   if (text.length > MAX_INPUT_CHARS) {
     throw new Error(
-      `Text is too long. Limit input to ${MAX_INPUT_CHARS.toLocaleString()} characters or chunk it before calling analyze.`
+      `Text is too long. Limit input to ${MAX_INPUT_CHARS.toLocaleString()} characters.`
     );
+  }
+
+  const lines = text.split(/\r?\n/);
+
+  if (lines.length > MAX_INPUT_LINES) {
+    throw new Error(
+      `Text has too many lines. Limit input to ${MAX_INPUT_LINES.toLocaleString()} lines.`
+    );
+  }
+
+  if (/([\s\S])\1{20,}/u.test(text)) {
+    throw new Error('Text appears to contain excessive repeated characters.');
+  }
+
+  const meaningfulChars =
+    text.match(/[A-Za-z0-9\u3040-\u30ff\u3400-\u9fff]/gu)?.length ?? 0;
+
+  const meaningfulRatio = meaningfulChars / text.length;
+
+  if (meaningfulRatio < MIN_MEANINGFUL_CHAR_RATIO) {
+    throw new Error('Text appears to contain too little meaningful content.');
+  }
+
+  const words = text
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((word) => word.length >= 2);
+
+  if (words.length >= 20) {
+    const counts = new Map<string, number>();
+
+    for (const word of words) {
+      counts.set(word, (counts.get(word) ?? 0) + 1);
+    }
+
+    const maxRepeatedWordCount = Math.max(...counts.values());
+    const duplicateRatio = maxRepeatedWordCount / words.length;
+
+    if (duplicateRatio > MAX_DUPLICATE_WORD_RATIO) {
+      throw new Error('Text appears to contain excessive repeated words.');
+    }
   }
 
   return text;

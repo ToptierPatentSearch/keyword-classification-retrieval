@@ -199,7 +199,7 @@ export function PricingPlans({
                 </span>
                 <div>
                   <p className="pricing-credit-count">
-                    {plan.credits} {language === 'ja' ? '回分' : 'Analyses'}
+                    {plan.credits} {plan.credits === 1 ? 'Analysis' : 'Analyses'}
                   </p>
                   <h3>{name}</h3>
                 </div>

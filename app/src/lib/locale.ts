@@ -14,9 +14,8 @@ function getBrowserLanguages(): string[] {
   return navigator.languages?.length ? [...navigator.languages] : [navigator.language || 'en-US'];
 }
 
-export function detectLanguage(languages = getBrowserLanguages()): LanguageCode {
-  // Japanese browser locales use the Japanese copy; every other language falls back to English.
-  return languages.some((language) => language.toLowerCase().startsWith('ja')) ? 'ja' : 'en';
+export function detectLanguage(_languages = getBrowserLanguages()): LanguageCode {
+  return 'en';
 }
 
 export function getRegionFromLocale(locale: string): string | null {
@@ -49,18 +48,18 @@ export function detectCurrency(languages = getBrowserLanguages()): SupportedCurr
 
 export const messages = {
   en: {
-    heading: 'Choose the Right Plan for You',
-    description: 'Buy analyses credits and start using the tool right away.',
-    testName: 'Test Use',
+    heading: 'Choose the Plan That Fits You',
+    description: 'Purchase analysis credits and start using the tool immediately.',
+    testName: 'Trial Use',
     businessName: 'Business Use',
-    testDescription: 'Try the tool with 2 analyses. Perfect for a quick test.',
-    businessDescription: 'More analyses for your business needs. Great for regular work.',
-    credits2: '2 analyses credits',
-    credits10: '10 analyses credits',
-    valid30: 'valid for 30 days',
-    valid180: 'valid for 180 days',
-    oneTime: 'one-time payment',
-    buy: (credits: number, price: string) => `Buy ${credits} Analyses — ${price}`,
+    testDescription: 'Try the tool with 2 analyses. Ideal for a quick test.',
+    businessDescription: 'Enough analysis credits for business use. Suitable for ongoing work.',
+    credits2: '2 analysis credits',
+    credits10: '10 analysis credits',
+    valid30: 'Valid for 30 days',
+    valid180: 'Valid for 180 days',
+    oneTime: 'One-time payment',
+    buy: (credits: number, price: string) => `Buy ${credits} analyses — ${price}`,
     loading: (credits: number) => `Preparing checkout for ${credits} credits...`,
     signInError: 'Please sign in before purchasing.',
     checkoutError: 'Unable to start checkout. Please try again.',
@@ -69,24 +68,23 @@ export const messages = {
     planStatusLoading: 'Loading your current credit balance...',
   },
   ja: {
-    ja: {
-      heading: 'Choose the Plan That Fits You',
-      description: 'Purchase analysis credits and start using the tool immediately.',
-      testName: 'Trial Use',
-      businessName: 'Business Use',
-      testDescription: 'Try the tool with 2 analyses. Ideal for a quick test.',
-      businessDescription: 'Enough analysis credits for business use. Suitable for ongoing work.',
-      credits2: '2 analysis credits',
-      credits10: '10 analysis credits',
-      valid30: 'Valid for 30 days',
-      valid180: 'Valid for 180 days',
-      oneTime: 'One-time payment',
-      buy: (credits: number, price: string) => `Buy ${credits} analyses — ${price}`,
-      loading: (credits: number) => `Preparing checkout for ${credits} credits...`,
-      signInError: 'Please sign in before purchasing.',
-      checkoutError: 'Unable to start checkout. Please try again.',
-      currentPlan: 'Current Plan',
-      remaining: (credits: number) => `Remaining Credits: ${credits}`,
-      planStatusLoading: 'Loading your current credit balance...',
-    },
-  } as const;
+    heading: 'Choose the Plan That Fits You',
+    description: 'Purchase analysis credits and start using the tool immediately.',
+    testName: 'Trial Use',
+    businessName: 'Business Use',
+    testDescription: 'Try the tool with 2 analyses. Ideal for a quick test.',
+    businessDescription: 'Enough analysis credits for business use. Suitable for ongoing work.',
+    credits2: '2 analysis credits',
+    credits10: '10 analysis credits',
+    valid30: 'Valid for 30 days',
+    valid180: 'Valid for 180 days',
+    oneTime: 'One-time payment',
+    buy: (credits: number, price: string) => `Buy ${credits} analyses — ${price}`,
+    loading: (credits: number) => `Preparing checkout for ${credits} credits...`,
+    signInError: 'Please sign in before purchasing.',
+    checkoutError: 'Unable to start checkout. Please try again.',
+    currentPlan: 'Current Plan',
+    remaining: (credits: number) => `Remaining Credits: ${credits}`,
+    planStatusLoading: 'Loading your current credit balance...',
+  },
+} as const;

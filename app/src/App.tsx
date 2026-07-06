@@ -3,7 +3,7 @@ import type { Session } from '@supabase/supabase-js';
 import { supabase } from './supabaseClient';
 import type { AnalysisResult } from './types';
 import { PricingPlans } from './components/PricingPlans';
-
+type PlanId = 'test' | 'business';
 function asErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'An unexpected error occurred.';
 }
@@ -73,7 +73,8 @@ export default function App() {
     const nextPlan = plan === 'test' || plan === 'business' ? plan : fallbackPlan;
 
     if (checkout === 'success' && (nextPlan === 'test' || nextPlan === 'business')) {
-      void fetchRemainingCredits();
+      setRemainingCredits(null);
+      setCreditRefreshKey((key) => key + 1);
       window.localStorage.removeItem('lastCheckoutPlan');
 
       window.history.replaceState(

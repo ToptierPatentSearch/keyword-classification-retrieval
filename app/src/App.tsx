@@ -21,7 +21,7 @@ function formatEstimatedDuration(totalSeconds: number): string {
 
 function estimateResultTime(characterCount: number): string {
   if (characterCount === 0) {
-    return 'Estimated result time: enter patent text to calculate.';
+    return 'Estimated analysis time: enter English or Japanese text to calculate.';
   }
 
   const inputBlocks = Math.ceil(characterCount / 500);

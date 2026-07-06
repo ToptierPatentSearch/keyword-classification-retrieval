@@ -83,14 +83,28 @@ export function PricingPlans({
   }, [session?.user.id, refreshKey]);
 
   useEffect(() => {
+    if (!session) {
+      return;
+    }
+
     const params = new URLSearchParams(window.location.search);
     const checkout = params.get('checkout');
     const plan = params.get('purchasedPlan') as PlanId | null;
     const fallbackPlan = window.localStorage.getItem('lastCheckoutPlan') as PlanId | null;
     const nextPlan = plan === 'test' || plan === 'business' ? plan : fallbackPlan;
 
-    if (checkout === 'success' || nextPlan === 'test' || nextPlan === 'business') {
+    if (checkout === 'success' && (nextPlan === 'test' || nextPlan === 'business')) {
       void fetchRemainingCredits();
+      window.localStorage.removeItem('lastCheckoutPlan');
+
+      window.history.replaceState(
+        {},
+        document.title,
+        window.location.pathname
+      );
+    }
+
+    if (checkout === 'cancelled') {
       window.localStorage.removeItem('lastCheckoutPlan');
 
       window.history.replaceState(
@@ -131,8 +145,7 @@ export function PricingPlans({
       window.location.href = data.url;
     } catch (checkoutError) {
       onError(
-        `${t.checkoutError}${
-          asErrorMessage(checkoutError) ? ` ${asErrorMessage(checkoutError)}` : ''
+        `${t.checkoutError}${asErrorMessage(checkoutError) ? ` ${asErrorMessage(checkoutError)}` : ''
         }`
       );
       setLoadingPlan(null);

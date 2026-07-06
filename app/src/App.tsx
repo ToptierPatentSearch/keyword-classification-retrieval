@@ -52,14 +52,47 @@ export default function App() {
       setAuthLoading(false);
     });
 
-    const { data: subscription } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
       setSession(nextSession);
       setAuthLoading(false);
     });
 
-    return () => subscription.subscription.unsubscribe();
+    return () => subscription.unsubscribe();
   }, []);
+  useEffect(() => {
+    if (!session) {
+      return;
+    }
 
+    const params = new URLSearchParams(window.location.search);
+    const checkout = params.get('checkout');
+    const plan = params.get('purchasedPlan') as PlanId | null;
+    const fallbackPlan = window.localStorage.getItem('lastCheckoutPlan') as PlanId | null;
+    const nextPlan = plan === 'test' || plan === 'business' ? plan : fallbackPlan;
+
+    if (checkout === 'success' && (nextPlan === 'test' || nextPlan === 'business')) {
+      void fetchRemainingCredits();
+      window.localStorage.removeItem('lastCheckoutPlan');
+
+      window.history.replaceState(
+        {},
+        document.title,
+        window.location.pathname
+      );
+    }
+
+    if (checkout === 'cancelled') {
+      window.localStorage.removeItem('lastCheckoutPlan');
+
+      window.history.replaceState(
+        {},
+        document.title,
+        window.location.pathname
+      );
+    }
+  }, [session?.user.id]);
   const sortedKeywords = useMemo(
     () =>
       Array.isArray(result?.keywords)
@@ -227,7 +260,7 @@ export default function App() {
           <p className="eyebrow">Patent AI Analysis</p>
           <h1>Sign in to classify patent keywords</h1>
           <p className="muted">
-            Authenticate with Supabase before sending text to the secure Edge Function. The OpenAI API key stays server-side.
+            Sign in to securely classify patent keywords. Your text is processed through our secure backend after authentication.
           </p>
 
           <form onSubmit={handleAuth} className="auth-form">
@@ -279,9 +312,11 @@ export default function App() {
       )}
       {hasCredits && (
         <section className="card">
-          <p className="eyebrow">利用可能な分析回数</p>
-          <p className="remaining-credits">
-            残り分析回数: <strong>{remainingCredits}回</strong>
+          <p
+            className="remaining-credits"
+            style={{ fontSize: '1.25rem', fontWeight: 700, textAlign: 'center' }}
+          >
+            Remaining analysis credits: <strong>{remainingCredits}</strong>
           </p>
         </section>
       )}

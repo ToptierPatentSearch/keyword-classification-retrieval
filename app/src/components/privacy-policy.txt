@@ -1,0 +1,221 @@
+C..0d.12d  Privacy Policy
+
+Privacy Policy
+
+1 Overview
+
+This Privacy Policy explains how we collect, use, store, share, and protect information when you use the keyword-classification-retrieval app.
+By using the app, you agree to the handling of information described in this Privacy Policy.
+
+2 Information We Collect
+
+We may collect the following categories of information.
+
+Account Information
+
+	• Email address
+	• Login status
+	• Authentication identifier
+	• Account creation date
+	• Account usage status
+	
+Payment Information
+
+Payment may be processed by Stripe or another payment provider. We may receive limited payment-related information, such as:
+	• Payment status
+	• Purchased plan or credit pack
+	• Transaction identifier
+	• Amount paid
+	• Currency
+	• Tax status
+	• Refund or dispute status
+	• Customer email address
+We do not directly store full credit card numbers.
+
+User Input
+
+We may process text, keywords, prompts, categories, descriptions, and other information that you submit to the app.
+You should not submit personal data, sensitive data, trade secrets, confidential client information, unpublished invention disclosures, passwords, API keys, or regulated information unless you are authorized to do so and accept the risk of processing.
+
+Output and Usage Data
+
+We may collect or store:
+	• Analysis results
+	• Credit usage
+	• Number of requests
+	• Date and time of requests
+	• Error logs
+	• Browser type
+	• Device information
+	• IP address
+	• Security logs
+	• App performance data
+	
+Support Communications
+
+If you contact us, we may collect:
+	• Your email address
+	• Message contents
+	• Screenshots you provide
+	• Issue descriptions
+	• Support history
+
+3 How We Use Information
+
+We use information to:
+	• Provide the app
+	• Authenticate users
+	• Process analysis requests
+	• Display results
+	• Manage credits and plans
+	• Process payments
+	• Prevent fraud and abuse
+	• Improve app performance
+	• Fix bugs
+	• Respond to support requests
+	• Maintain security
+	• Comply with legal obligations
+	• Enforce Terms of Use
+
+4 AI Processing
+
+The app may send your input to external AI services to generate analysis results. The AI service may process the input according to its own technical, security, and contractual rules.
+Do not submit confidential, sensitive, regulated, or highly valuable information unless you are authorized to do so and accept the risk of external processing.
+
+5 Third-Party Service Providers
+
+We may use third-party service providers for:
+	• Authentication
+	• Database hosting
+	• Cloud infrastructure
+	• Edge functions
+	• Payment processing
+	• AI processing
+	• Error monitoring
+	• Email delivery
+	• Analytics
+	• Security
+
+These providers may process information only as necessary to provide their services to us, subject to their own terms, security practices, and legal obligations.
+
+Examples may include:
+	• Supabase for authentication, database, and backend infrastructure
+	• Stripe for payment processing
+	• OpenAI or another AI provider for AI-based analysis
+	• Hosting or deployment providers for app delivery
+
+6 Legal Basis and Purpose of Use
+
+We process information for purposes such as service delivery, contract performance, user support, payment handling, security, fraud prevention, app improvement, and legal compliance.
+Where consent is required, we will seek consent as required by applicable law.
+
+7 Data Sharing
+
+We may share information with:
+	• Service providers necessary to operate the app
+	• Payment processors
+	• AI processing providers
+	• Cloud infrastructure providers
+	• Security and fraud-prevention providers
+	• Professional advisors
+	• Authorities, if required by law
+	• Successors in connection with business transfer, merger, or reorganization
+
+We do not sell personal information in the ordinary sense of selling user data for money.
+
+8 International Data Transfer
+
+Your information may be processed in countries or regions outside your country of residence. These countries may have data protection laws different from those in your jurisdiction.
+Where required, we will take appropriate measures for cross-border data handling.
+
+9 Data Retention
+
+We retain information only as long as reasonably necessary for:
+	• Providing the app
+	• Maintaining account records
+	• Managing credits and payments
+	• Resolving disputes
+	• Preventing abuse
+	• Complying with legal obligations
+	• Improving and securing the app
+
+Input and output retention may be limited, deleted, anonymized, or stored depending on app settings and operational needs.
+
+Retention settings:
+	• Account data: while the account is active
+	• Payment records: as required for accounting and legal purposes
+	• Analysis logs:  30 days
+	• Support messages: 1 year
+	• Security logs: 90 days
+	
+10 Security
+
+We use reasonable administrative, technical, and organizational measures to protect information. However, no online service is completely secure.
+Users are responsible for:
+	• Keeping login credentials secure
+	• Avoiding confidential or sensitive input
+	• Using trusted devices
+	• Logging out when appropriate
+	• Reporting suspected unauthorized access
+
+11 User Rights
+
+Depending on applicable law, you may have the right to request:
+	• Access to your personal information
+	• Correction of inaccurate information
+	• Deletion of information
+	• Suspension of use
+	• Explanation of handling
+	• Withdrawal of consent
+	• Objection to certain processing
+	• Data portability, where applicable
+
+To make a request, contact:
+tps.takeuchi@gmail.com
+
+We may need to verify your identity before responding.
+
+12 Children
+
+The app is not intended for children under 13. Children should not use the app or submit personal information without appropriate parental or guardian consent.
+
+13 Cookies and Similar Technologies
+
+The app may use cookies, local storage, or similar technologies for:
+	• Login sessions
+	• Security
+	• Payment flow
+	• App preferences
+	• Usage analysis
+	• Performance improvement
+	
+You may disable cookies in your browser, but some app functions may not work correctly.
+
+14 Confidentiality Warning
+
+The app is not a secure repository for confidential invention disclosures, unpublished patent applications, trade secrets, client documents, or NDA-protected materials.
+
+Before submitting any technical or business information, confirm that:
+	• You are authorized to submit it
+	• It does not contain prohibited information
+	• It does not violate a client obligation
+	• It does not require special legal protection
+	• You accept the risk of AI and cloud processing
+
+15 Changes to This Privacy Policy
+
+We may update this Privacy Policy from time to time. The updated version will be posted in the app with a new effective date.
+Continued use of the app after an update means you accept the updated Privacy Policy, unless additional consent is required by law.
+
+16 Contact
+
+For privacy questions or requests, contact:
+tps.takeuchi@gmail.com
+
+Operator:
+Top-tier Patent Search (TPS)
+Tokyo, Japan 
+
+
+      
+

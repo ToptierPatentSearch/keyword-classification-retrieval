@@ -1,0 +1,77 @@
+Input Limitations
+
+1 Purpose of This Page
+
+This page explains what users should and should not enter into the keyword-classification-retrieval app (referred to as app). The app is designed to help users classify, organize, and retrieve keyword-related information. It is not designed to process unrestricted, sensitive, unlawful, malicious, or excessively large text.
+
+2 Accepted Input
+
+You may input ordinary text related to keyword classification, keyword extraction, technical topic analysis, search support, document organization, or similar research-support purposes.
+
+Examples of acceptable input include:
+
+	• Technical descriptions
+	• Product feature descriptions
+	• Research notes
+	• Patent-related keywords
+	• Search terms
+	• Short technical paragraphs
+	• Non-confidential business descriptions
+	• Publicly available technical information
+	• General classification targets
+
+3 Prohibited Input
+
+Do not input any of the following:
+
+	• Personal information of yourself or another person, unless strictly necessary
+	• Sensitive personal information, including health, biometric, criminal, financial, religious, political, or children’s information
+	• Passwords, API keys, access tokens, private keys, or authentication credentials
+	• Credit card numbers, bank account details, tax IDs, national IDs, passport numbers, or driver’s license numbers
+	• Trade secrets, unpublished invention disclosures, confidential client materials, or NDA-protected information
+	• Text that infringes another person’s copyright, trademark, patent, trade secret, privacy, or other rights
+	• Illegal, abusive, defamatory, discriminatory, harassing, threatening, sexually exploitative, or violent content
+	• Malware, phishing instructions, exploit code, credential-harvesting text, or cyber-abuse instructions
+	• Spam, random repeated characters, intentionally meaningless text, or excessively long nonsense text
+	• Text intended to overload, damage, bypass, reverse engineer, or interfere with the app or its connected services
+
+4 Length Limitation
+
+The app may reject, shorten, or fail to process input that is too long. The current recommended maximum is:
+
+	• 10,000 characters per analysis
+	• 50 keywords per request
+	• 1 analysis request at a time
+
+The actual limit may change depending on system capacity, AI model limitations, pricing, security settings, or abuse-prevention requirements.
+
+5 Accuracy Limitation
+
+The app may produce incomplete, inaccurate, outdated, or unexpected results. Users must independently review all results before relying on them.
+The app does not guarantee:
+
+	• Correct classification
+	• Complete keyword extraction
+	• Complete prior-art coverage
+	• Patentability
+	• Freedom to operate
+	• Non-infringement
+	• Legal compliance
+	• Commercial success
+	• Business suitability
+	• Technical feasibility
+
+6 Patent and Legal Limitation
+
+The app may support patent search preparation, keyword organization, and classification work. However, it does not provide legal advice, patent attorney advice, infringement opinions, invalidity opinions, freedom-to-operate opinions, or professional legal conclusions.
+
+For legal decisions, consult a qualified patent attorney, attorney-at-law, or other licensed professional.
+
+7 AI Processing Limitation
+
+The app may send input text to external AI services for analysis. Do not enter confidential, sensitive, regulated, or highly valuable information unless you are authorized to do so and accept the risk of external processing.
+
+8 Right to Reject Input
+
+We may reject, block, limit, delete, or refuse to process input if we believe it violates these Input Limitations, creates security risk, causes excessive load, infringes rights, violates law, or interferes with the proper operation of the app.
+

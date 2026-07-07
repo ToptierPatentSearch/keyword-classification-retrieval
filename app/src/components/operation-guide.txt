@@ -1,0 +1,169 @@
+Operation Guide
+
+1 Overview
+
+keyword-classification-retrieval (herein after referred to as app) is a web app that helps users classify, analyze, and retrieve keyword-related information. It is intended for research support, search preparation, technical organization, and productivity improvement.
+
+Typical use cases include:
+
+	• Organizing keywords by technical field
+	• Classifying text into useful categories
+	• Supporting patent search preparation
+	• Identifying related concepts
+	• Improving keyword lists
+	• Structuring technical investigation notes
+
+2 Account Creation
+
+To use the app, you may need to create an account.
+
+Basic steps:
+
+	1. Open the app.
+	2. Select sign up or log in.
+	3. Enter your email address.
+	4. Follow the authentication or email confirmation instructions.
+	5. After successful login, return to the app.
+	
+If an email confirmation link does not open correctly, check whether the app URL, redirect URL, or browser setting is correct.
+
+3 Plan or Credit Selection
+
+Some functions may require credits, a paid plan, or a purchased analysis pack.
+
+Basic steps:
+
+	1. Open the plan selection area.
+	2. Choose the plan or credit pack.
+	3. Proceed to Stripe Checkout.
+	4. Complete payment.
+	5. Return to the app.
+	6. Confirm that your remaining credits or available usage have been updated.
+
+Payment processing may be handled by Stripe. We do not directly store full credit card numbers.
+
+4 How to Analyze Text
+
+Basic steps:
+
+	1. Log in to your account.
+	2. Confirm that you have available credits or usage rights.
+	3. Enter text or keywords into the input field.
+	4. Confirm that the input does not violate the Input Limitations.
+	5. Click the Analyze button.
+	6. Wait for the result to appear.
+	7. Review the result carefully.
+
+The result cannot be edited directly within the app, but after downloading it as a PDF, you may edit, copy, or reuse the downloaded file as needed.
+
+5 Recommended Input Style
+
+For better results, use clear and structured input.
+
+Recommended format:
+
+	• State the technical field.
+	• Provide a short description of the subject.
+	• List important keywords.
+	• Avoid unnecessary background text.
+	• Avoid private or confidential information.
+	• Use short paragraphs rather than extremely long blocks.
+
+Example:
+
+Technical field: wireless charging
+Purpose: classify keywords for prior-art search
+Keywords: coil alignment, magnetic coupling, foreign object detection, charging pad, power transfer efficiency
+
+6 Poor Input Examples
+
+Avoid input such as:
+
+	• Random repeated characters
+	• Extremely long pasted text with no clear purpose
+	• Confidential invention disclosures
+	• Personal data about customers or employees
+	• Source code containing API keys
+	• Text copied from a confidential client document
+	• Text intended to test or bypass system restrictions
+
+7 Result Review
+
+The app output is a machine-generated support result. Before using it for business, patent, legal, technical, or client-facing work, you should check:
+
+	• Whether the classification is correct
+	• Whether important keywords are missing
+	• Whether unrelated keywords were included
+	• Whether the output language is appropriate
+	• Whether the result contains unsupported assumptions
+	• Whether professional review is needed
+
+8 Credit Consumption
+
+An analysis may consume credits when the Analyze button is clicked and the request is submitted.
+
+Credits may still be consumed if:
+
+	• The user submits unsuitable input
+	• The result is not useful to the user
+	• The user closes the browser during processing
+	• The user repeats the same request
+	• The input causes an error after external processing has started
+
+Credits should not be consumed if the system rejects the request before processing begins. However, this may depend on the implementation.
+
+9 Troubleshooting
+
+Stripe Checkout does not appear
+
+Check:
+	• Browser pop-up or redirect settings
+	• Internet connection
+	• Whether you are logged in
+	• Whether the price ID and checkout function are correctly configured
+
+Payment completed but credits do not appear
+
+Check:
+	• Whether you returned to the correct success URL
+	• Whether you are logged in with the same email address
+	• Whether payment was completed, pending, failed, or refunded
+
+Contact support if the issue continues.
+
+Analyze button does not appear
+
+Possible causes:
+	• You are not logged in
+	• Your credits are zero
+	• The app failed to load your account status
+	• Browser cache is outdated
+	• A network or authentication error occurred
+
+Try refreshing the page, logging out and back in, or checking your credit status.
+
+Result does not appear
+
+Possible causes:
+	• Input was too long
+	• Input violated the Input Limitations
+	• AI processing failed
+	• Network connection failed
+	• Credits were insufficient
+	• The external service was temporarily unavailable
+Try shortening the input and submitting again.
+
+10 Support
+
+For support, contact:
+tps.takeuchi@gmail.com 
+
+Please include:
+	• Your account email address
+	• Date and time of the issue
+	• Browser name
+	• Screenshot, if available
+	• Description of what you clicked
+	• Whether payment or analysis credits were involved
+
+Do not send passwords, credit card numbers, API keys, or confidential client information in support messages.

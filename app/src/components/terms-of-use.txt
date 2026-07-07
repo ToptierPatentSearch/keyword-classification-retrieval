@@ -1,0 +1,149 @@
+Terms of Use
+
+1 Acceptance of Terms
+
+These Terms of Use govern your access to and use of the keyword-classification-retrieval app. By accessing or using the app, you agree to these Terms. If you do not agree, do not use the app.
+
+2 Service Description
+
+The app provides keyword retrieval, keyword classification, text analysis, and related research-support functions. The app may use AI services, databases, authentication services, payment services, and cloud infrastructure.
+The app is a support tool. It is not a substitute for professional judgment.
+
+3 Eligibility
+
+You may use the app only if you are legally able to enter into these Terms and comply with applicable law. If you use the app on behalf of a company or client, you represent that you have authority to do so.
+
+4 Account Responsibility
+
+You are responsible for:
+	• Maintaining the confidentiality of your login credentials
+	• All activity under your account
+	• Ensuring that your input complies with these Terms
+	• Ensuring that you have the right to submit the input
+	• Reviewing all output before use
+You must notify us if you suspect unauthorized use of your account.
+
+5 Prohibited Use
+
+You must not use the app to:
+	• Violate law or third-party rights
+	• Submit confidential information without authorization
+	• Submit personal or sensitive information unnecessarily
+	• Upload or generate unlawful, harmful, abusive, or infringing content
+	• Interfere with app security or operation
+	• Attempt to bypass usage limits, payment controls, authentication, or access restrictions
+	• Reverse engineer, scrape, overload, or attack the app
+	• Use automated tools to submit excessive requests
+	• Misrepresent AI-generated output as professionally verified work
+	• Use the app for legal, patent, financial, medical, or safety-critical decisions without qualified professional review
+
+6 User Input
+
+You retain responsibility for the text, keywords, and other information you submit. You represent that you have the necessary rights and authorization to submit the input.
+You should not submit trade secrets, confidential client materials, unpublished invention disclosures, personal data, regulated data, or sensitive information unless you are authorized to do so and accept the risk of processing.
+
+7 App Output
+
+The app output may be inaccurate, incomplete, outdated, or unsuitable for your purpose. You are responsible for checking and validating the output.
+We do not guarantee that output will be:
+	• Correct
+	• Complete
+	• Unique
+	• Non-infringing
+	• Legally sufficient
+	• Technically sufficient
+	• Commercially useful
+	• Suitable for patent filing, patent search, FTO, invalidity analysis, or infringement analysis
+
+8 No Professional Advice
+
+The app does not provide legal advice, patent attorney advice, financial advice, medical advice, tax advice, or other regulated professional advice.
+Patent-related output is for informational and research-support purposes only. For patentability, infringement, invalidity, freedom-to-operate, or legal-risk decisions, consult a qualified professional.
+
+9 Payment and Credits
+
+Some app functions may require payment, credits, or a subscription.
+Unless otherwise stated:
+	• Prices are shown before checkout.
+	• Payment is processed by a third-party payment provider.
+	• Credits are used for analysis requests.
+	• Credits may expire if stated at the time of purchase.
+	• Promotional or trial credits may be changed or withdrawn.
+	• Taxes may be added depending on location, settings, and payment processing configuration.
+
+10 Refunds
+
+Refunds are handled at our discretion unless required by applicable law.
+Refunds may be refused where:
+	• Credits have already been used
+	• The service was properly delivered
+	• The issue was caused by prohibited input or user error
+	• The user violated these Terms
+	• The request is made after seven days from purchase
+If a duplicate payment, technical payment error, or unauthorized payment is suspected, contact support promptly.
+
+11 Availability
+
+We aim to keep the app available, but we do not guarantee uninterrupted operation.
+The app may be unavailable due to:
+	• Maintenance
+	• Security updates
+	• System errors
+	• Browser issues
+	• Network failures
+	• Payment provider issues
+	• AI provider issues
+	• Cloud infrastructure issues
+	• Abuse prevention
+	• Legal or operational reasons
+
+12 Changes to the App
+
+We may modify, suspend, limit, or discontinue all or part of the app at any time. We may also change features, pricing, credit rules, usage limits, and supported functions.
+
+13 Intellectual Property
+
+The app, including its design, code, interface, branding, workflow, and original materials, belongs to us or our licensors.
+You may not copy, reproduce, modify, distribute, sell, or reverse engineer the app except as permitted by law or written permission.
+
+14 User Rights to Output
+
+Subject to these Terms, you may use app output for your own internal, business, or research-support purposes. However, you are responsible for checking whether the output is accurate, lawful, non-infringing, and suitable for your purpose.
+We do not guarantee that similar or identical output will not be generated for other users.
+
+15 Third-Party Services
+
+The app may use third-party services, including payment processors, authentication providers, cloud infrastructure providers, database providers, analytics providers, and AI service providers.
+Your use of the app may be affected by the availability, rules, security, and terms of those third-party services.
+
+16 Limitation of Liability
+
+To the maximum extent permitted by law, we are not liable for indirect, incidental, special, consequential, exemplary, or punitive damages, including lost profits, lost business, lost data, loss of goodwill, or business interruption.
+To the maximum extent permitted by law, our total liability for claims related to the app is limited to the amount you paid for the app during the three months before the claim.
+Some jurisdictions do not allow the exclusion or limitation of certain damages or liabilities. Therefore, the above limitations apply only to the maximum extent permitted by applicable law.
+
+17 Indemnity
+
+You agree to indemnify and hold us harmless from claims, damages, losses, liabilities, costs, and expenses arising from:
+	• Your use of the app
+	• Your input
+	• Your use of output
+	• Your violation of these Terms
+	• Your violation of law or third-party rights
+	• Your unauthorized submission of confidential, personal, or sensitive information
+
+18 Termination
+
+We may suspend or terminate your access if we believe that you violated these Terms, created risk, failed to pay, abused the app, or used the app unlawfully.
+You may stop using the app at any time.
+
+19 Governing Law and Dispute Resolution
+
+These Terms are governed by the laws of Japan, unless mandatory law requires otherwise.
+Any dispute will be handled by the courts located in Tokyo District Court as the court of first instance, unless mandatory law requires otherwise.
+
+20 Contact
+
+For questions about these Terms, contact:
+
+tps.takeuchi@gmail.com

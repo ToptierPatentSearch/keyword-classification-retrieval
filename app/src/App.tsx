@@ -30,10 +30,86 @@ function estimateResultTime(characterCount: number): string {
 
   return `Estimated result time for ${characterCount.toLocaleString()} characters: ${formatEstimatedDuration(minimumSeconds)}–${formatEstimatedDuration(maximumSeconds)}.`;
 }
+type LandingPageProps = {
+  onAcceptTerms: () => void;
+};
+
+function LandingPage({ onAcceptTerms }: LandingPageProps) {
+  const [checked, setChecked] = useState(false);
+
+  return (
+    <main className="landing-page">
+      <section className="landing-card">
+        <p className="eyebrow">Patent AI Analysis</p>
+        <h1>Keyword Classification Retrieval</h1>
+
+        <p className="landing-lead">
+          This app helps classify patent-related keywords from English or Japanese
+          technical text and supports patent search preparation by organizing
+          likely technical terms and classification-related information.
+        </p>
+
+        <div className="landing-section">
+          <h2>Brief Features</h2>
+          <ul>
+            <li>Classifies patent-related keywords from technical text.</li>
+            <li>Supports English and Japanese patent text.</li>
+            <li>Helps organize terms for prior art search and patent analysis.</li>
+            <li>Processes analysis securely after authentication.</li>
+          </ul>
+        </div>
+        <div className="landing-section">
+
+          <h2>Terms of Use</h2>
+          <p className="muted">
+            This app provides AI-assisted keyword classification and retrieval
+            support. The output is for reference and research assistance only.
+            It does not constitute legal advice, patentability opinion,
+            infringement opinion, freedom-to-operate opinion, or professional
+            legal judgment.
+          </p>
+        </div>
+        <p className="muted">
+          Users are responsible for reviewing the output before relying on it.
+          Do not submit confidential, personal, or highly sensitive information
+          unless you are authorized to do so.
+        </p>
+
+        <label className="terms-check">
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={(event) => setChecked(event.target.checked)}
+          />
+          <span>I accept the Terms of Use.</span>
+        </label>
+
+        <button
+          className="primary-button"
+          type="button"
+          disabled={!checked}
+          onClick={onAcceptTerms}
+        >
+          Continue to Sign Up / Sign In
+        </button>
+      </section>
+    </main>
+  );
+}
+
+
+
 export default function App() {
+  const TERMS_ACCEPTED_KEY = 'kcr_terms_accepted';
+
+  const [termsAccepted, setTermsAccepted] = useState<boolean>(() => {
+    return window.localStorage.getItem(TERMS_ACCEPTED_KEY) === 'true';
+  });
+
   const [session, setSession] = useState<Session | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [email, setEmail] = useState('');
+
   const [password, setPassword] = useState('');
   const [authMode, setAuthMode] = useState<'sign-in' | 'sign-up'>('sign-in');
   const [authMessage, setAuthMessage] = useState('');
@@ -46,6 +122,11 @@ export default function App() {
   const [remainingCreditsAfterAnalysis, setRemainingCreditsAfterAnalysis] = useState<number | null>(null);
   const [remainingCredits, setRemainingCredits] = useState<number | null>(null);
   const analyzeInFlightRef = useRef(false);
+  function handleAcceptTerms() {
+    window.localStorage.setItem(TERMS_ACCEPTED_KEY, 'true');
+    setTermsAccepted(true);
+  }
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setSession(data.session);
@@ -252,6 +333,11 @@ export default function App() {
 
   if (authLoading && !session) {
     return <main className="shell"><p className="status-card">Loading authentication…</p></main>;
+  }
+
+
+  if (!session && !termsAccepted) {
+    return <LandingPage onAcceptTerms={handleAcceptTerms} />;
   }
 
   if (!session) {

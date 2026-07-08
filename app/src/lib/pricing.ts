@@ -63,7 +63,7 @@ export function getLocalizedPricing(currency: SupportedCurrency): LocalizedPrici
   return LOCALIZED_PRICING[currency];
 }
 
-export function formatPlanPrice(planId: PlanId, currency: SupportedCurrency, locale: string): string {
+export function formatPlanPrice(planId: PlanId, currency: SupportedCurrency, locale = 'en-US'): string {
   const pricing = getLocalizedPricing(currency);
 
   return new Intl.NumberFormat(locale, {

@@ -25,11 +25,7 @@ export function PricingPlans({
   refreshKey,
   onCreditsChange,
 }: PricingPlansProps) {
-  const browserLocale =
-    typeof navigator === 'undefined'
-      ? 'en-US'
-      : navigator.languages?.[0] || navigator.language || 'en-US';
-
+  const priceDisplayLocale = 'en-US';
   const language = useMemo(() => detectLanguage(), []);
   const currency = useMemo<SupportedCurrency>(() => detectCurrency(), []);
   const localizedPricing = useMemo(() => getLocalizedPricing(currency), [currency]);
@@ -127,10 +123,10 @@ export function PricingPlans({
 
     try {
       const selectedPriceId = localizedPricing.plans[planId].stripePriceId;
-      const displayedPrice = formatPlanPrice(planId, currency, browserLocale);
+      const displayedPrice = formatPlanPrice(planId, currency, priceDisplayLocale);
 
-      console.log('locale =', language);
-      console.log('currency =', localizedPricing.currency);
+      console.log('uiLanguage =', language);
+      console.log('pricingCurrency =', localizedPricing.currency);
       console.log('planId =', planId);
       console.log('displayPrice =', displayedPrice);
       console.log('stripePriceId =', selectedPriceId);
@@ -156,9 +152,7 @@ export function PricingPlans({
   if (balanceLoading || remainingCredits === null) {
     return (
       <section className="card">
-        <p className="muted">
-          {language === 'ja' ? '残り分析回数を確認中...' : 'Loading remaining analyses...'}
-        </p>
+        <p className="muted">Loading remaining analyses...</p>
       </section>
     );
   }
@@ -176,11 +170,11 @@ export function PricingPlans({
 
       <div className="pricing-grid">
         {PRICING_PLANS.map((plan) => {
-          const price = formatPlanPrice(plan.id, currency, browserLocale);
+          const price = formatPlanPrice(plan.id, currency, priceDisplayLocale);
           const selectedPriceId = localizedPricing.plans[plan.id].stripePriceId;
 
-          console.log('locale =', language);
-          console.log('currency =', localizedPricing.currency);
+          console.log('uiLanguage =', language);
+          console.log('pricingCurrency =', localizedPricing.currency);
           console.log('planId =', plan.id);
           console.log('displayPrice =', price);
           console.log('stripePriceId =', selectedPriceId);

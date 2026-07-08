@@ -1,3 +1,4 @@
+import Footer from "./components/Footer";
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from './supabaseClient';
@@ -489,6 +490,7 @@ export default function App() {
           </div>
         </section>
       )}
+      <Footer />
     </main>
   );
 }

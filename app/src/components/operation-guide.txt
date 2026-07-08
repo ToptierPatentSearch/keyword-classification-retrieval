@@ -1,11 +1,9 @@
-Operation Guide
 
-1 Overview
+1  Overview
 
 keyword-classification-retrieval (herein after referred to as app) is a web app that helps users classify, analyze, and retrieve keyword-related information. It is intended for research support, search preparation, technical organization, and productivity improvement.
 
 Typical use cases include:
-
 	• Organizing keywords by technical field
 	• Classifying text into useful categories
 	• Supporting patent search preparation
@@ -13,12 +11,11 @@ Typical use cases include:
 	• Improving keyword lists
 	• Structuring technical investigation notes
 
-2 Account Creation
+2  Account Creation
 
 To use the app, you may need to create an account.
 
 Basic steps:
-
 	1. Open the app.
 	2. Select sign up or log in.
 	3. Enter your email address.
@@ -27,12 +24,11 @@ Basic steps:
 	
 If an email confirmation link does not open correctly, check whether the app URL, redirect URL, or browser setting is correct.
 
-3 Plan or Credit Selection
+3  Plan or Credit Selection
 
 Some functions may require credits, a paid plan, or a purchased analysis pack.
 
 Basic steps:
-
 	1. Open the plan selection area.
 	2. Choose the plan or credit pack.
 	3. Proceed to Stripe Checkout.
@@ -42,10 +38,9 @@ Basic steps:
 
 Payment processing may be handled by Stripe. We do not directly store full credit card numbers.
 
-4 How to Analyze Text
+4  How to Analyze Text
 
 Basic steps:
-
 	1. Log in to your account.
 	2. Confirm that you have available credits or usage rights.
 	3. Enter text or keywords into the input field.
@@ -56,12 +51,11 @@ Basic steps:
 
 The result cannot be edited directly within the app, but after downloading it as a PDF, you may edit, copy, or reuse the downloaded file as needed.
 
-5 Recommended Input Style
+5  Recommended Input Style
 
 For better results, use clear and structured input.
 
 Recommended format:
-
 	• State the technical field.
 	• Provide a short description of the subject.
 	• List important keywords.
@@ -75,10 +69,9 @@ Technical field: wireless charging
 Purpose: classify keywords for prior-art search
 Keywords: coil alignment, magnetic coupling, foreign object detection, charging pad, power transfer efficiency
 
-6 Poor Input Examples
+6  Poor Input Examples
 
 Avoid input such as:
-
 	• Random repeated characters
 	• Extremely long pasted text with no clear purpose
 	• Confidential invention disclosures
@@ -87,10 +80,9 @@ Avoid input such as:
 	• Text copied from a confidential client document
 	• Text intended to test or bypass system restrictions
 
-7 Result Review
+7  Result Review
 
 The app output is a machine-generated support result. Before using it for business, patent, legal, technical, or client-facing work, you should check:
-
 	• Whether the classification is correct
 	• Whether important keywords are missing
 	• Whether unrelated keywords were included
@@ -98,12 +90,11 @@ The app output is a machine-generated support result. Before using it for busine
 	• Whether the result contains unsupported assumptions
 	• Whether professional review is needed
 
-8 Credit Consumption
+8  Credit Consumption
 
 An analysis may consume credits when the Analyze button is clicked and the request is submitted.
 
 Credits may still be consumed if:
-
 	• The user submits unsuitable input
 	• The result is not useful to the user
 	• The user closes the browser during processing
@@ -112,7 +103,7 @@ Credits may still be consumed if:
 
 Credits should not be consumed if the system rejects the request before processing begins. However, this may depend on the implementation.
 
-9 Troubleshooting
+9  Troubleshooting
 
 Stripe Checkout does not appear
 
@@ -153,7 +144,7 @@ Possible causes:
 	• The external service was temporarily unavailable
 Try shortening the input and submitting again.
 
-10 Support
+10  Support
 
 For support, contact:
 tps.takeuchi@gmail.com 

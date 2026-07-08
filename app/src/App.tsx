@@ -1,4 +1,5 @@
 import Footer from "./components/Footer";
+import termsOfUseText from './components/terms-of-use.txt?raw';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from './supabaseClient';
@@ -60,21 +61,17 @@ function LandingPage({ onAcceptTerms }: LandingPageProps) {
           </ul>
         </div>
         <div className="landing-section">
-
           <h2>Terms of Use</h2>
-          <p className="muted">
-            This app provides AI-assisted keyword classification and retrieval
-            support. The output is for reference and research assistance only.
-            It does not constitute legal advice, patentability opinion,
-            infringement opinion, freedom-to-operate opinion, or professional
-            legal judgment.
-          </p>
+          <div className="muted terms-text">
+            {termsOfUseText
+              .split(/\n\s*\n/)
+              .map((paragraph) => paragraph.trim())
+              .filter(Boolean)
+              .map((paragraph, index) => (
+                <p key={`terms-paragraph-${index}`}>{paragraph}</p>
+              ))}
+          </div>
         </div>
-        <p className="muted">
-          Users are responsible for reviewing the output before relying on it.
-          Do not submit confidential, personal, or highly sensitive information
-          unless you are authorized to do so.
-        </p>
 
         <label className="terms-check">
           <input

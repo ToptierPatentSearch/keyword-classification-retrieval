@@ -124,6 +124,7 @@ Deno.serve(async (request) => {
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',
       customer: customerId,
+      locale: 'en',
 
       automatic_tax: { enabled: true },
       billing_address_collection: 'required',

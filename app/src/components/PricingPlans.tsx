@@ -182,7 +182,7 @@ export function PricingPlans({
           const name = plan.id === 'test' ? t.testName : t.businessName;
           const description = plan.id === 'test' ? t.testDescription : t.businessDescription;
           const creditLabel = plan.credits === 2 ? t.credits2 : t.credits10;
-          const validLabel = plan.validityDays === 30 ? t.valid30 : t.valid180;
+          const validLabel = plan.validityDays === 10 ? t.valid10 : t.valid30;
           const isLoading = loadingPlan === plan.id;
 
           return (

@@ -38,7 +38,29 @@ Deno.serve(async (request) => {
   const { error: eventInsertError } = await admin
     .from('stripe_webhook_events')
     .insert({ stripe_event_id: event.id, event_type: event.type, payload: event as unknown as Record<string, unknown> });
-  if (eventInsertError) return new Response('Already processed', { status: 200 });
+
+  if (eventInsertError) {
+    const { data: existingEvent, error: existingEventError } = await admin
+      .from('stripe_webhook_events')
+      .select('processed_at')
+      .eq('stripe_event_id', event.id)
+      .maybeSingle();
+
+    if (existingEventError) {
+      console.error('Failed to check existing Stripe webhook event:', existingEventError);
+      return jsonResponse(
+        { error: 'Webhook idempotency check failed', detail: existingEventError.message },
+        { status: 500 }
+      );
+    }
+
+    if (existingEvent?.processed_at) {
+      return jsonResponse({ received: true, alreadyProcessed: true });
+    }
+
+    // The event row exists but was not fully processed. Continue safely.
+    // Credit grants remain idempotent because stripe_checkout_session_id is unique.
+  }
 
   if (event.type === 'checkout.session.completed') {
     const session = event.data.object as Stripe.Checkout.Session;

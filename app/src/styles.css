@@ -748,3 +748,39 @@ tr:last-child td {
   line-height: 1.65;
   color: #475569;
 }
+.admin-user-activity {
+  margin-top: 32px;
+  padding: 20px;
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.admin-user-activity h2 {
+  margin-top: 0;
+  font-size: 1.25rem;
+}
+
+.admin-table-wrap {
+  margin-top: 16px;
+  overflow-x: auto;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.admin-table th,
+.admin-table td {
+  border: 1px solid #ddd;
+  padding: 8px 10px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.admin-table th {
+  font-weight: 700;
+  background: #f5f5f5;
+}

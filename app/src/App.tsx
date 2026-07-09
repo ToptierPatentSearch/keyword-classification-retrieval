@@ -1,6 +1,7 @@
 import Footer from "./components/Footer";
 import termsOfUseText from './components/terms-of-use.txt?raw';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import AdminUserActivity from "./components/AdminUserActivity";
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from './supabaseClient';
 import type { AnalysisResult } from './types';
@@ -487,6 +488,8 @@ export default function App() {
           </div>
         </section>
       )}
+      <AdminUserActivity />
+      
       <Footer />
     </main>
   );

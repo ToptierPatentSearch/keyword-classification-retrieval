@@ -11,6 +11,7 @@ interface CheckoutRequest {
 }
 
 const PLAN_CREDITS: Record<PlanId, number> = { test: 2, business: 10 };
+const PLAN_VALIDITY_DAYS: Record<PlanId, number> = { test: 10, business: 30 };
 const PRICE_ENV: Record<PlanId, Record<Currency, string>> = {
   // Stripe Price ID mapping: values are read from secrets so no fake Price IDs are trusted or committed.
   test: { usd: 'STRIPE_PRICE_ID_TEST_USD', jpy: 'STRIPE_PRICE_ID_TEST_JPY', eur: 'STRIPE_PRICE_ID_TEST_EUR' },
@@ -85,6 +86,7 @@ Deno.serve(async (request) => {
     const planId = getPlan(body.planId);
     const currency = getCurrency(body.currency);
     const expectedCredits = PLAN_CREDITS[planId];
+    const validityDays = PLAN_VALIDITY_DAYS[planId];
     if (body.credits !== expectedCredits) throw new Error(`credits must be ${expectedCredits} for the ${planId} plan.`);
 
     const priceId = getRequiredEnv(PRICE_ENV[planId][currency]);
@@ -118,8 +120,14 @@ Deno.serve(async (request) => {
     const siteUrl = getRequiredUrlEnv('SITE_URL');
     const successUrl = buildSuccessUrl(siteUrl, planId);
     const cancelUrl = siteUrl;
-    const metadata = { supabase_user_id: user.id, plan_id: planId, credits: String(expectedCredits), currency, price_id: priceId };
-
+    const metadata = {
+      supabase_user_id: user.id,
+      plan_id: planId,
+      credits: String(expectedCredits),
+      validity_days: String(validityDays),
+      currency,
+      price_id: priceId,
+    };
 
     const session = await stripe.checkout.sessions.create({
       mode: 'payment',

@@ -2,11 +2,19 @@ import Stripe from 'npm:stripe@^18.0.0';
 import { createClient } from 'npm:@supabase/supabase-js@^2.75.0';
 
 const PLAN_CREDITS: Record<string, number> = { test: 2, business: 10 };
+const PLAN_VALIDITY_DAYS: Record<string, number> = { test: 10, business: 30 };
 
 function getRequiredEnv(name: string): string {
   const value = Deno.env.get(name);
   if (!value) throw new Error(`${name} is not configured in Supabase secrets.`);
   return value;
+}
+
+function jsonResponse(body: unknown, init: ResponseInit = {}) {
+  return new Response(JSON.stringify(body), {
+    ...init,
+    headers: { 'Content-Type': 'application/json', ...(init.headers ?? {}) },
+  });
 }
 
 Deno.serve(async (request) => {
@@ -26,7 +34,7 @@ Deno.serve(async (request) => {
 
   const admin = createClient(getRequiredEnv('SUPABASE_URL'), getRequiredEnv('SUPABASE_SERVICE_ROLE_KEY'), { auth: { persistSession: false } });
 
-  // Webhook idempotency: the unique Stripe event row and unique payment/session transaction prevent duplicate credit grants.
+  // Webhook idempotency: the unique Stripe event row and unique payment/session grant prevent duplicate credit grants.
   const { error: eventInsertError } = await admin
     .from('stripe_webhook_events')
     .insert({ stripe_event_id: event.id, event_type: event.type, payload: event as unknown as Record<string, unknown> });
@@ -36,10 +44,15 @@ Deno.serve(async (request) => {
     const session = event.data.object as Stripe.Checkout.Session;
     const planId = session.metadata?.plan_id ?? '';
     const credits = PLAN_CREDITS[planId];
+    const validityDays = PLAN_VALIDITY_DAYS[planId];
     const userId = session.metadata?.supabase_user_id ?? session.client_reference_id;
 
-    if (session.mode === 'payment' && userId && credits) {
-      await admin.from('stripe_checkout_sessions').update({ status: session.status, payment_status: session.payment_status }).eq('stripe_checkout_session_id', session.id);
+    if (session.mode === 'payment' && userId && credits && validityDays) {
+      await admin
+        .from('stripe_checkout_sessions')
+        .update({ status: session.status, payment_status: session.payment_status })
+        .eq('stripe_checkout_session_id', session.id);
+
       await admin.from('stripe_payments').upsert({
         user_id: userId,
         stripe_customer_id: String(session.customer),
@@ -49,57 +62,47 @@ Deno.serve(async (request) => {
         amount_total: session.amount_total,
         currency: session.currency,
         payment_status: session.payment_status,
-        metadata: session.metadata ?? {},
+        metadata: {
+          ...(session.metadata ?? {}),
+          validity_days: String(validityDays),
+        },
       }, { onConflict: 'stripe_checkout_session_id' });
 
-    const { error: balanceError } = await admin
-      .from('user_credit_balances')
-        .upsert(
+      const { error: grantError } = await admin.rpc('grant_analysis_credits', {
+        p_user_id: userId,
+        p_credits: credits,
+        p_plan_id: planId,
+        p_stripe_checkout_session_id: session.id,
+        p_stripe_payment_intent_id: typeof session.payment_intent === 'string' ? session.payment_intent : null,
+      });
+
+      if (grantError) {
+        console.error('Failed to grant analysis credits:', grantError);
+
+        return jsonResponse(
           {
-            user_id: userId,
-            remaining_credits: credits,
-            updated_at: new Date().toISOString(),
+            error: 'Credit grant failed',
+            detail: grantError.message,
           },
-          {
-            onConflict: 'user_id',
-          }
-        )
-        .select('user_id, remaining_credits')
-        .single();
-
-      if (balanceError) {
-        console.error('Failed to upsert credit balance:', balanceError);
-
-        return new Response(
-          JSON.stringify({
-            error: 'Credit balance update failed',
-            detail: balanceError.message,
-          }),
-          {
-            status: 500,
-            headers: { 'Content-Type': 'application/json' },
-          }
+          { status: 500 }
         );
       }
 
       const { data: finalBalanceRow, error: finalBalanceError } = await admin
         .from('user_credit_balances')
-        .select('remaining_credits')
+        .select('remaining_credits, next_expires_at')
         .eq('user_id', userId)
-        .single();
+        .maybeSingle();
 
       if (finalBalanceError) {
         console.error('Failed to read final balance:', finalBalanceError);
 
-        return new Response(
-          JSON.stringify({
+        return jsonResponse(
+          {
             error: 'Final credit balance read failed',
             detail: finalBalanceError.message,
-          }),
-          {
-            status: 500,
-            headers: { 'Content-Type': 'application/json' },
-          }
+          },
+          { status: 500 }
         );
       }
 
@@ -109,17 +112,18 @@ Deno.serve(async (request) => {
         user_id: userId,
         plan_id: planId,
         delta: credits,
-        balance_after: finalBalanceRow?.remaining_credits,
+        validity_days: validityDays,
+        balance_after: finalBalanceRow?.remaining_credits ?? 0,
+        next_expires_at: finalBalanceRow?.next_expires_at ?? null,
         source: 'stripe_checkout',
       });
-    }      
+    }
   }
 
   await admin
     .from('stripe_webhook_events')
     .update({ processed_at: new Date().toISOString() })
     .eq('stripe_event_id', event.id);
-  return new Response(JSON.stringify({ received: true }), { 
-    headers: { 'Content-Type': 'application/json' } 
-  });
+
+  return jsonResponse({ received: true });
 });

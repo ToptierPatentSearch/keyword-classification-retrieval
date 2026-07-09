@@ -5,7 +5,7 @@ export type PlanId = 'test' | 'business';
 export interface PricingPlan {
   id: PlanId;
   credits: 2 | 10;
-  validityDays: 30 | 180;
+  validityDays: 10 | 30;
   theme: 'blue' | 'green';
 }
 
@@ -23,8 +23,8 @@ export interface LocalizedPricing {
 }
 
 export const PRICING_PLANS: PricingPlan[] = [
-  { id: 'test', credits: 2, validityDays: 30, theme: 'blue' },
-  { id: 'business', credits: 10, validityDays: 180, theme: 'green' },
+  { id: 'test', credits: 2, validityDays: 10, theme: 'blue' },
+  { id: 'business', credits: 10, validityDays: 30, theme: 'green' },
 ];
 
 const stripePriceId = (key: string): string => import.meta.env[key] as string | undefined ?? '';

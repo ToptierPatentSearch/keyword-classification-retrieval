@@ -31,7 +31,7 @@ function estimateResultTime(characterCount: number): string {
   const minimumSeconds = 20 + (inputBlocks * 8);
   const maximumSeconds = minimumSeconds + 20 + (Math.ceil(characterCount / 2000) * 10);
 
-  return `Estimated result time for ${characterCount.toLocaleString()} characters: ${formatEstimatedDuration(minimumSeconds)}–${formatEstimatedDuration(maximumSeconds)}.`;
+  return `Estimated analysis time for ${characterCount.toLocaleString()} characters: ${formatEstimatedDuration(minimumSeconds)}–${formatEstimatedDuration(maximumSeconds)}.`;
 }
 type LandingPageProps = {
   onAcceptTerms: () => void;
@@ -96,7 +96,17 @@ function LandingPage({ onAcceptTerms }: LandingPageProps) {
   );
 }
 
+function detectInputLanguage(text: string): string {
+  return /[\u3040-\u30ff\u3400-\u9fff]/.test(text) ? "ja" : "en";
+}
 
+function estimateInputTokens(text: string): number {
+  const chars = text.length;
+
+  return /[\u3040-\u30ff\u3400-\u9fff]/.test(text)
+    ? Math.ceil(chars * 0.9)
+    : Math.ceil(chars / 4);
+}
 
 export default function App() {
   const TERMS_ACCEPTED_KEY = 'kcr_terms_accepted';
@@ -120,6 +130,7 @@ export default function App() {
   const [creditRefreshKey, setCreditRefreshKey] = useState(0);
   const [remainingCreditsAfterAnalysis, setRemainingCreditsAfterAnalysis] = useState<number | null>(null);
   const [remainingCredits, setRemainingCredits] = useState<number | null>(null);
+  const [measuredEstimatedResultTime, setMeasuredEstimatedResultTime] = useState<string | null>(null);
   const analyzeInFlightRef = useRef(false);
   function handleAcceptTerms() {
     window.localStorage.setItem(TERMS_ACCEPTED_KEY, 'true');
@@ -182,10 +193,60 @@ export default function App() {
     [result],
   );
 
-  const estimatedResultTime = useMemo(
+  const fallbackEstimatedResultTime = useMemo(
     () => estimateResultTime(text.trim().length),
     [text],
   );
+
+  const estimatedResultTime =
+    measuredEstimatedResultTime ?? fallbackEstimatedResultTime;
+  useEffect(() => {
+    const trimmedText = text.trim();
+
+    if (!session || trimmedText.length === 0) {
+      setMeasuredEstimatedResultTime(null);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(async () => {
+      const language = detectInputLanguage(trimmedText);
+
+      const { data, error } = await supabase.rpc(
+        'get_analysis_time_estimate',
+        {
+          p_input_chars: trimmedText.length,
+          p_language: language,
+        }
+      );
+
+      if (error || !Array.isArray(data) || data.length === 0) {
+        setMeasuredEstimatedResultTime(null);
+        return;
+      }
+
+      const estimate = data[0] as {
+        sample_count: number;
+        median_seconds: number | null;
+        p90_seconds: number | null;
+      };
+
+      if (
+        estimate.sample_count >= 3 &&
+        estimate.median_seconds &&
+        estimate.p90_seconds
+      ) {
+        setMeasuredEstimatedResultTime(
+          `Estimated analysis time based on ${estimate.sample_count} previous analyses: ${formatEstimatedDuration(
+            estimate.median_seconds
+          )}–${formatEstimatedDuration(estimate.p90_seconds)}.`
+        );
+      } else {
+        setMeasuredEstimatedResultTime(null);
+      }
+    }, 500);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [text, session?.user.id]);
   const creditsLoaded = typeof remainingCredits === 'number';
   const hasCredits = creditsLoaded && remainingCredits > 0;
   const noCredits = !creditsLoaded || remainingCredits <= 0;
@@ -244,7 +305,30 @@ export default function App() {
     setResult(null);
     setRemainingCreditsAfterAnalysis(null);
 
+    const startedAt = Date.now();
+    let analysisLogId: string | null = null;
+
     try {
+      const { data: logRow, error: logInsertError } = await supabase
+        .from('analysis_logs')
+        .insert({
+          user_id: session.user.id,
+          input_chars: text.trim().length,
+          estimated_input_tokens: estimateInputTokens(text),
+          selected_model: 'gpt-5.5',
+          language: detectInputLanguage(text),
+          status: 'started',
+          started_at: new Date().toISOString(),
+        })
+        .select('id')
+        .single();
+
+      if (logInsertError) {
+        console.error('Failed to insert analysis log:', logInsertError);
+      } else {
+        analysisLogId = logRow.id;
+      }
+
       const { data, error: functionError } = await supabase.functions.invoke<
         AnalysisResult & { remainingCredits?: number }
       >('analyze', {
@@ -269,6 +353,18 @@ export default function App() {
         }
 
         if (response?.status === 402) {
+          if (analysisLogId) {
+            await supabase
+              .from('analysis_logs')
+              .update({
+                finished_at: new Date().toISOString(),
+                duration_ms: Date.now() - startedAt,
+                status: 'no_credits',
+                error_message: 'No remaining analysis credits.',
+              })
+              .eq('id', analysisLogId);
+          }
+
           setError('');
           setResult(null);
           setRemainingCreditsAfterAnalysis(0);
@@ -290,15 +386,38 @@ export default function App() {
 
       setResult(data);
 
+      if (analysisLogId) {
+        await supabase
+          .from('analysis_logs')
+          .update({
+            finished_at: new Date().toISOString(),
+            duration_ms: Date.now() - startedAt,
+            output_chars: JSON.stringify(data).length,
+            status: 'success',
+          })
+          .eq('id', analysisLogId);
+      }
+
       setRemainingCreditsAfterAnalysis(0);
       setRemainingCredits(0);
     } catch (analyzeError) {
+      if (analysisLogId) {
+        await supabase
+          .from('analysis_logs')
+          .update({
+            finished_at: new Date().toISOString(),
+            duration_ms: Date.now() - startedAt,
+            status: 'error',
+            error_message: asErrorMessage(analyzeError),
+          })
+          .eq('id', analysisLogId);
+      }
+
       setError(asErrorMessage(analyzeError));
     } finally {
       analyzeInFlightRef.current = false;
       setLoading(false);
     }
-
   }
   function handleClear() {
     setText('');
@@ -489,7 +608,7 @@ export default function App() {
         </section>
       )}
       <AdminUserActivity />
-      
+
       <Footer />
     </main>
   );

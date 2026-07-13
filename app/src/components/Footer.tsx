@@ -100,7 +100,7 @@ export default function Footer() {
         </p>
 
         <p className="app-footer-copyright">
-          © 2026 keyword-classification-retrieval. All rights reserved.
+          © 2026 Top-tier Patent Search. All rights reserved.
         </p>
       </footer>
     </>

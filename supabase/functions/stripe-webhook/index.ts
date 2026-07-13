@@ -121,15 +121,15 @@ Deno.serve(async (request) => {
         payment_status: session.payment_status,
       });
     } else {
-      const planId = session.metadata?.plan_id ?? '';
+      const planMode = session.metadata?.plan_mode ?? '';
       const creditsFromMetadata = Number.parseInt(
         session.metadata?.credits ?? '',
         10,
       );
-      const expectedCredits = PLAN_CREDITS[planId];
-      const validityDays = PLAN_VALIDITY_DAYS[planId];
+      const expectedCredits = PLAN_CREDITS[planMode];
+      const validityDays = PLAN_VALIDITY_DAYS[planMode];
       const userId =
-        session.metadata?.supabase_user_id ??
+        session.metadata?.user_id ??
         session.client_reference_id ??
         '';
 
@@ -144,7 +144,7 @@ Deno.serve(async (request) => {
           stripe_event_id: event.id,
           stripe_session_id: session.id,
           user_id: userId || null,
-          plan_id: planId || null,
+          plan_mode: planMode || null,
           credits_metadata: session.metadata?.credits ?? null,
           expected_credits: expectedCredits ?? null,
         });
@@ -220,7 +220,7 @@ Deno.serve(async (request) => {
         {
           p_user_id: userId,
           p_credits: expectedCredits,
-          p_plan_id: planId,
+          p_plan_id: planMode,
           p_stripe_checkout_session_id: session.id,
           p_stripe_payment_intent_id: paymentIntentId,
           p_stripe_event_id: event.id,
@@ -247,8 +247,8 @@ Deno.serve(async (request) => {
 
       const grantObject =
         grantResult &&
-        typeof grantResult === 'object' &&
-        !Array.isArray(grantResult)
+          typeof grantResult === 'object' &&
+          !Array.isArray(grantResult)
           ? (grantResult as Record<string, unknown>)
           : {};
 
@@ -258,10 +258,9 @@ Deno.serve(async (request) => {
 
       const { data: finalBalanceRow, error: finalBalanceError } = await admin
         .from('user_credit_balances')
-        .select('remaining_credits, next_expires_at')
+        .select('remaining_credits, plan_mode, expires_at')
         .eq('user_id', userId)
         .maybeSingle();
-
       if (finalBalanceError) {
         console.error('Failed to read final balance:', finalBalanceError);
 
@@ -279,13 +278,13 @@ Deno.serve(async (request) => {
         stripe_session_id: session.id,
         stripe_payment_intent_id: paymentIntentId || null,
         user_id: userId,
-        plan_id: planId,
+        plan_mode: planMode,
         credits: expectedCredits,
         validity_days: validityDays,
         granted: grantObject.granted ?? null,
         already_processed: alreadyProcessed,
         balance_after: finalBalanceRow?.remaining_credits ?? 0,
-        next_expires_at: finalBalanceRow?.next_expires_at ?? null,
+        expires_at: finalBalanceRow?.expires_at ?? null,
         source: 'stripe_checkout',
       });
     }

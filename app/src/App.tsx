@@ -108,6 +108,137 @@ function estimateInputTokens(text: string): number {
     : Math.ceil(chars / 4);
 }
 
+function formatPlanLabel(planId: PlanId | null): string {
+  if (planId === 'test') return 'Test plan';
+  if (planId === 'business') return 'Business plan';
+  return '-';
+}
+
+function getTimeZoneOffsetMinutes(date: Date, timeZone: string): number | null {
+  try {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      hourCycle: 'h23',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    }).formatToParts(date);
+
+    const values = Object.fromEntries(
+      parts
+        .filter((part) => part.type !== 'literal')
+        .map((part) => [part.type, part.value])
+    );
+
+    const localTimeAsUtc = Date.UTC(
+      Number(values.year),
+      Number(values.month) - 1,
+      Number(values.day),
+      Number(values.hour),
+      Number(values.minute),
+      Number(values.second)
+    );
+
+    return Math.round((localTimeAsUtc - date.getTime()) / 60000);
+  } catch {
+    return null;
+  }
+}
+
+function getLocalTimeZoneAbbreviation(date: Date, timeZone: string): string {
+  const offsetMinutes = getTimeZoneOffsetMinutes(date, timeZone);
+
+  const fixedAbbreviations: Record<string, string> = {
+    'Asia/Tokyo': 'JST',
+    'Asia/Seoul': 'KST',
+    'Asia/Shanghai': 'CST',
+    'Asia/Hong_Kong': 'HKT',
+    'Asia/Singapore': 'SGT',
+    UTC: 'UTC',
+  };
+
+  if (fixedAbbreviations[timeZone]) {
+    return fixedAbbreviations[timeZone];
+  }
+
+  const dstAwareAbbreviations: Record<
+    string,
+    { standard: string; daylight: string; standardOffset: number; daylightOffset: number }
+  > = {
+    'America/New_York': { standard: 'EST', daylight: 'EDT', standardOffset: -300, daylightOffset: -240 },
+    'America/Detroit': { standard: 'EST', daylight: 'EDT', standardOffset: -300, daylightOffset: -240 },
+    'America/Toronto': { standard: 'EST', daylight: 'EDT', standardOffset: -300, daylightOffset: -240 },
+    'America/Chicago': { standard: 'CST', daylight: 'CDT', standardOffset: -360, daylightOffset: -300 },
+    'America/Denver': { standard: 'MST', daylight: 'MDT', standardOffset: -420, daylightOffset: -360 },
+    'America/Los_Angeles': { standard: 'PST', daylight: 'PDT', standardOffset: -480, daylightOffset: -420 },
+    'America/Vancouver': { standard: 'PST', daylight: 'PDT', standardOffset: -480, daylightOffset: -420 },
+    'Europe/Berlin': { standard: 'CET', daylight: 'CEST', standardOffset: 60, daylightOffset: 120 },
+    'Europe/Paris': { standard: 'CET', daylight: 'CEST', standardOffset: 60, daylightOffset: 120 },
+    'Europe/Rome': { standard: 'CET', daylight: 'CEST', standardOffset: 60, daylightOffset: 120 },
+    'Europe/Madrid': { standard: 'CET', daylight: 'CEST', standardOffset: 60, daylightOffset: 120 },
+    'Europe/Amsterdam': { standard: 'CET', daylight: 'CEST', standardOffset: 60, daylightOffset: 120 },
+    'Europe/Brussels': { standard: 'CET', daylight: 'CEST', standardOffset: 60, daylightOffset: 120 },
+    'Europe/Vienna': { standard: 'CET', daylight: 'CEST', standardOffset: 60, daylightOffset: 120 },
+    'Europe/Zurich': { standard: 'CET', daylight: 'CEST', standardOffset: 60, daylightOffset: 120 },
+    'Europe/Stockholm': { standard: 'CET', daylight: 'CEST', standardOffset: 60, daylightOffset: 120 },
+    'Europe/Oslo': { standard: 'CET', daylight: 'CEST', standardOffset: 60, daylightOffset: 120 },
+    'Europe/Copenhagen': { standard: 'CET', daylight: 'CEST', standardOffset: 60, daylightOffset: 120 },
+    'Europe/Prague': { standard: 'CET', daylight: 'CEST', standardOffset: 60, daylightOffset: 120 },
+    'Europe/Warsaw': { standard: 'CET', daylight: 'CEST', standardOffset: 60, daylightOffset: 120 },
+    'Europe/Budapest': { standard: 'CET', daylight: 'CEST', standardOffset: 60, daylightOffset: 120 },
+    'Europe/London': { standard: 'GMT', daylight: 'BST', standardOffset: 0, daylightOffset: 60 },
+    'Australia/Sydney': { standard: 'AEST', daylight: 'AEDT', standardOffset: 600, daylightOffset: 660 },
+    'Australia/Melbourne': { standard: 'AEST', daylight: 'AEDT', standardOffset: 600, daylightOffset: 660 },
+  };
+
+  const mappedZone = dstAwareAbbreviations[timeZone];
+
+  if (mappedZone && offsetMinutes !== null) {
+    if (offsetMinutes === mappedZone.daylightOffset) {
+      return mappedZone.daylight;
+    }
+
+    return mappedZone.standard;
+  }
+
+  const timeZoneName = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour: 'numeric',
+    timeZoneName: 'short',
+  })
+    .formatToParts(date)
+    .find((part) => part.type === 'timeZoneName')?.value;
+
+  return timeZoneName || timeZone;
+}
+
+function formatLocalExpirationDate(isoString: string | null): string {
+  if (!isoString) return '-';
+
+  const date = new Date(isoString);
+
+  if (Number.isNaN(date.getTime())) {
+    return '-';
+  }
+
+  const localTimeZone =
+    Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+
+  const formattedDate = new Intl.DateTimeFormat('en-US', {
+    timeZone: localTimeZone,
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date);
+
+  return `${formattedDate} ${getLocalTimeZoneAbbreviation(date, localTimeZone)}`;
+}
+
 export default function App() {
   const TERMS_ACCEPTED_KEY = 'kcr_terms_accepted';
 
@@ -130,6 +261,8 @@ export default function App() {
   const [creditRefreshKey, setCreditRefreshKey] = useState(0);
   const [remainingCreditsAfterAnalysis, setRemainingCreditsAfterAnalysis] = useState<number | null>(null);
   const [remainingCredits, setRemainingCredits] = useState<number | null>(null);
+  const [selectedPlan, setSelectedPlan] = useState<PlanId | null>(null);
+  const [creditsExpireAt, setCreditsExpireAt] = useState<string | null>(null);
   const [measuredEstimatedResultTime, setMeasuredEstimatedResultTime] = useState<string | null>(null);
   const analyzeInFlightRef = useRef(false);
   function handleAcceptTerms() {
@@ -185,6 +318,76 @@ export default function App() {
       );
     }
   }, [session?.user.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function fetchCreditBalance() {
+      if (!session) {
+        setRemainingCredits(null);
+        setSelectedPlan(null);
+        setCreditsExpireAt(null);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('user_credit_balances')
+        .select('remaining_credits, plan_mode, expires_at')
+        .eq('user_id', session.user.id)
+        .maybeSingle();
+
+      if (cancelled) {
+        return;
+      }
+
+      if (error) {
+        console.error('Failed to fetch credit balance:', error);
+        setRemainingCredits(0);
+        setSelectedPlan(null);
+        setCreditsExpireAt(null);
+        return;
+      }
+
+      if (!data) {
+        setRemainingCredits(0);
+        setSelectedPlan(null);
+        setCreditsExpireAt(null);
+        return;
+      }
+
+      const remaining =
+        typeof data.remaining_credits === 'number'
+          ? data.remaining_credits
+          : 0;
+      const planMode =
+        data.plan_mode === 'test' || data.plan_mode === 'business'
+          ? data.plan_mode
+          : null;
+      const expiresAt =
+        typeof data.expires_at === 'string' ? data.expires_at : null;
+      const isExpired = expiresAt
+        ? new Date(expiresAt).getTime() <= Date.now()
+        : false;
+
+      if (remaining <= 0 || isExpired) {
+        setRemainingCredits(0);
+        setSelectedPlan(null);
+        setCreditsExpireAt(null);
+        return;
+      }
+
+      setRemainingCredits(remaining);
+      setSelectedPlan(planMode);
+      setCreditsExpireAt(expiresAt);
+    }
+
+    void fetchCreditBalance();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.user.id, creditRefreshKey]);
+
   const sortedKeywords = useMemo(
     () =>
       Array.isArray(result?.keywords)
@@ -369,6 +572,8 @@ export default function App() {
           setResult(null);
           setRemainingCreditsAfterAnalysis(0);
           setRemainingCredits(0);
+          setSelectedPlan(null);
+          setCreditsExpireAt(null);
           setCreditRefreshKey((key) => key + 1);
           return;
         }
@@ -398,8 +603,20 @@ export default function App() {
           .eq('id', analysisLogId);
       }
 
-      setRemainingCreditsAfterAnalysis(0);
-      setRemainingCredits(0);
+      const nextRemainingCredits =
+        typeof data.remainingCredits === 'number'
+          ? data.remainingCredits
+          : Math.max((remainingCredits ?? 1) - 1, 0);
+
+      setRemainingCreditsAfterAnalysis(nextRemainingCredits);
+      setRemainingCredits(nextRemainingCredits);
+
+      if (nextRemainingCredits <= 0) {
+        setSelectedPlan(null);
+        setCreditsExpireAt(null);
+      } else {
+        setCreditRefreshKey((key) => key + 1);
+      }
     } catch (analyzeError) {
       if (analysisLogId) {
         await supabase
@@ -424,7 +641,7 @@ export default function App() {
     setResult(null);
     setError('');
     setRemainingCreditsAfterAnalysis(null);
-    setRemainingCredits(0);
+    setCreditRefreshKey((key) => key + 1);
   }
   async function handleDownloadPdf() {
     if (!result) {
@@ -447,6 +664,9 @@ export default function App() {
   async function handleSignOut() {
     await supabase.auth.signOut();
     setResult(null);
+    setRemainingCredits(null);
+    setSelectedPlan(null);
+    setCreditsExpireAt(null);
   }
 
   if (authLoading && !session) {
@@ -523,6 +743,16 @@ export default function App() {
           >
             Remaining analysis credits: <strong>{remainingCredits}</strong>
           </p>
+          {selectedPlan && creditsExpireAt && (
+            <p
+              className="credit-expiration"
+              style={{ marginTop: '0.5rem', textAlign: 'center' }}
+            >
+              Selected plan: <strong>{formatPlanLabel(selectedPlan)}</strong>
+              {' | '}
+              Credits expire: <strong>{formatLocalExpirationDate(creditsExpireAt)}</strong>
+            </p>
+          )}
         </section>
       )}
 

@@ -121,8 +121,8 @@ Deno.serve(async (request) => {
     const successUrl = buildSuccessUrl(siteUrl, planId);
     const cancelUrl = siteUrl;
     const metadata = {
-      supabase_user_id: user.id,
-      plan_id: planId,
+      user_id: user.id,
+      plan_mode: planId,
       credits: String(expectedCredits),
       validity_days: String(validityDays),
       currency,

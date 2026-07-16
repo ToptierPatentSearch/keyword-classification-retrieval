@@ -4,9 +4,194 @@ import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import AdminUserActivity from "./components/AdminUserActivity";
 import type { Session } from '@supabase/supabase-js';
 import { supabase } from './supabaseClient';
-import type { AnalysisResult } from './types';
+import type {
+  AnalysisResult,
+  ClassificationCandidateEvidence,
+  ClassificationCodeEvidence,
+  ClassificationSystem,
+} from './types';
 import { PricingPlans } from './components/PricingPlans';
 type PlanId = 'test' | 'business';
+
+type ClassificationEvidenceCellProps = {
+  system: ClassificationSystem;
+  codes: string[];
+  evidence?: ClassificationCodeEvidence[];
+  candidates?: ClassificationCandidateEvidence[];
+};
+
+function ClassificationEvidenceCell({
+  system,
+  codes,
+  evidence,
+  candidates,
+}: ClassificationEvidenceCellProps) {
+  const evidenceItems: ClassificationCodeEvidence[] =
+    evidence && evidence.length > 0
+      ? evidence
+      : codes.map((code) => ({
+          code,
+          status: 'ai_suggested' as const,
+        }));
+
+  const suggestedCodeKeys = new Set(
+    evidenceItems.map((item) =>
+      item.code.toUpperCase().replace(/[^A-Z0-9]/g, ''),
+    ),
+  );
+
+  const additionalCandidates = (candidates ?? [])
+    .filter(
+      (candidate) =>
+        !suggestedCodeKeys.has(
+          candidate.code.toUpperCase().replace(/[^A-Z0-9]/g, ''),
+        ),
+    )
+    .slice(0, 3);
+
+  if (evidenceItems.length === 0 && additionalCandidates.length === 0) {
+    return (
+      <span style={{ color: '#64748b', fontSize: '0.8rem' }}>
+        {system === 'FI'
+          ? 'No FI candidate found in the currently imported FI coverage.'
+          : '—'}
+      </span>
+    );
+  }
+
+  return (
+    <div style={{ display: 'grid', gap: '0.7rem', minWidth: '13rem' }}>
+      {evidenceItems.map((item, index) => {
+        const databaseVerified = item.status === 'database_verified';
+        const title = item.title_en || item.title_ja;
+
+        return (
+          <div
+            key={`${system}-${item.code}-${index}`}
+            style={{
+              paddingBottom: '0.55rem',
+              borderBottom: '1px solid #e2e8f0',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '0.4rem',
+              }}
+            >
+              <strong>{item.code}</strong>
+              <span
+                style={{
+                  display: 'inline-flex',
+                  padding: '0.2rem 0.5rem',
+                  borderRadius: '999px',
+                  background: databaseVerified ? '#dcfce7' : '#dbeafe',
+                  color: databaseVerified ? '#166534' : '#1e40af',
+                  fontSize: '0.72rem',
+                  fontWeight: 800,
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {databaseVerified ? 'Database verified' : 'AI suggested'}
+              </span>
+            </div>
+
+            {title && (
+              <div
+                style={{
+                  marginTop: '0.25rem',
+                  color: '#64748b',
+                  fontSize: '0.78rem',
+                  lineHeight: 1.35,
+                }}
+              >
+                {title}
+                {item.edition ? ` · ${item.edition}` : ''}
+              </div>
+            )}
+          </div>
+        );
+      })}
+
+      {additionalCandidates.length > 0 && (
+        <div style={{ display: 'grid', gap: '0.45rem' }}>
+          <span
+            style={{
+              color: '#475569',
+              fontSize: '0.72rem',
+              fontWeight: 800,
+              textTransform: 'uppercase',
+              letterSpacing: '0.04em',
+            }}
+          >
+            Database candidates
+          </span>
+          {additionalCandidates.map((candidate) => {
+            const title = candidate.title_en || candidate.title_ja;
+            const score = Math.max(
+              0,
+              Math.min(
+                1,
+                candidate.match_score ?? candidate.similarity_score ?? 0,
+              ),
+            );
+
+            return (
+              <div
+                key={`${system}-candidate-${candidate.code}`}
+                style={{
+                  padding: '0.45rem 0.55rem',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '0.65rem',
+                  background: '#f8fafc',
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '0.4rem',
+                  }}
+                >
+                  <strong>{candidate.code}</strong>
+                  <span
+                    style={{
+                      color: '#6d28d9',
+                      background: '#ede9fe',
+                      borderRadius: '999px',
+                      padding: '0.16rem 0.45rem',
+                      fontSize: '0.7rem',
+                      fontWeight: 800,
+                    }}
+                  >
+                    Candidate {Math.round(score * 100)}%
+                  </span>
+                </div>
+                {title && (
+                  <div
+                    style={{
+                      marginTop: '0.2rem',
+                      color: '#64748b',
+                      fontSize: '0.76rem',
+                      lineHeight: 1.35,
+                    }}
+                  >
+                    {title}
+                    {candidate.edition ? ` · ${candidate.edition}` : ''}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function asErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'An unexpected error occurred.';
 }
@@ -792,8 +977,12 @@ export default function App() {
             <div>
               <h2>Results</h2>
               <p className="muted">Detected language: <strong>{result.language}</strong></p>
-
-
+              <p className="muted" style={{ marginBottom: 0 }}>
+                IPC, CPC, and FI suggestions are marked <strong>Database verified</strong>{' '}
+                only when the code exists in the imported classification database.
+                Additional title-matched entries are displayed as <strong>Database candidates</strong>.
+                Unmatched codes and all F-term codes remain <strong>AI suggested</strong>.
+              </p>
 
             </div>
             <button className="primary" type="button" onClick={handleDownloadPdf} disabled={!Array.isArray(result.keywords) || result.keywords.length === 0 || pdfLoading}>
@@ -824,10 +1013,37 @@ export default function App() {
                     <td>{keyword.normalized_term}</td>
                     <td>{keyword.count}</td>
                     <td>{keyword.rank}</td>
-                    <td>{keyword.ipc.join(', ') || '—'}</td>
-                    <td>{keyword.cpc.join(', ') || '—'}</td>
-                    <td>{keyword.fi.join(', ') || '—'}</td>
-                    <td>{keyword.f_term.join(', ') || '—'}</td>
+                    <td>
+                      <ClassificationEvidenceCell
+                        system="IPC"
+                        codes={keyword.ipc}
+                        evidence={keyword.ipc_evidence}
+                        candidates={keyword.ipc_candidates}
+                      />
+                    </td>
+                    <td>
+                      <ClassificationEvidenceCell
+                        system="CPC"
+                        codes={keyword.cpc}
+                        evidence={keyword.cpc_evidence}
+                        candidates={keyword.cpc_candidates}
+                      />
+                    </td>
+                    <td>
+                      <ClassificationEvidenceCell
+                        system="FI"
+                        codes={keyword.fi}
+                        evidence={keyword.fi_evidence}
+                        candidates={keyword.fi_candidates}
+                      />
+                    </td>
+                    <td>
+                      <ClassificationEvidenceCell
+                        system="F-term"
+                        codes={keyword.f_term}
+                        evidence={keyword.f_term_evidence}
+                      />
+                    </td>
                     <td><span className={`badge ${keyword.classification_confidence}`}>{keyword.classification_confidence}</span></td>
                     <td>{keyword.reason}</td>
                   </tr>

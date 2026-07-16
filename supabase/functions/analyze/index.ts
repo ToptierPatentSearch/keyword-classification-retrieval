@@ -1,53 +1,40 @@
 import OpenAI from 'npm:openai@^5.0.0';
-import { createClient } from 'npm:@supabase/supabase-js@^2.44.4';
+import {
+  createClient,
+  type SupabaseClient,
+} from 'npm:@supabase/supabase-js@^2.44.4';
 
 type Confidence = 'high' | 'medium' | 'low';
 type PatentLanguage = 'en' | 'ja';
-type ClassificationSystem = 'ipc' | 'cpc' | 'fi' | 'f_term';
+type ClassificationSystem = 'IPC' | 'CPC' | 'FI';
+type ClassificationVerificationStatus =
+  | 'database_verified'
+  | 'ai_suggested';
 
 interface AnalyzeRequest {
   text?: unknown;
   input?: unknown;
 }
 
-interface KeywordDraft {
-  term: string;
-  normalized_term: string;
-  count: number;
-  rank: number;
-  search_terms: string[];
-  reason: string;
+interface ClassificationCodeEvidence {
+  code: string;
+  status: ClassificationVerificationStatus;
+  title_en?: string | null;
+  title_ja?: string | null;
+  edition?: string | null;
 }
 
-interface KeywordSelection {
-  rank: number;
-  ipc: string[];
-  cpc: string[];
-  fi: string[];
-  f_term: string[];
-  classification_confidence: Confidence;
-  reason: string;
-}
-
-interface OfficialClassificationCandidate {
+interface ClassificationCandidate {
   system: ClassificationSystem;
   code: string;
-  title: string;
-  description: string | null;
+  normalized_code?: string | null;
+  title_en: string | null;
+  title_ja: string | null;
+  parent_code: string | null;
+  hierarchy_level: number | null;
   edition: string;
-  source_name: string;
-  source_url: string;
-  score: number;
-}
-
-interface ClassificationEvidence {
-  system: ClassificationSystem;
-  code: string;
-  title: string;
-  edition: string;
-  source_name: string;
-  source_url: string;
-  match_score: number;
+  similarity_score: number;
+  match_score?: number;
 }
 
 interface KeywordClassification {
@@ -59,9 +46,15 @@ interface KeywordClassification {
   cpc: string[];
   fi: string[];
   f_term: string[];
+  ipc_evidence?: ClassificationCodeEvidence[];
+  cpc_evidence?: ClassificationCodeEvidence[];
+  fi_evidence?: ClassificationCodeEvidence[];
+  f_term_evidence?: ClassificationCodeEvidence[];
+  ipc_candidates?: ClassificationCandidate[];
+  cpc_candidates?: ClassificationCandidate[];
+  fi_candidates?: ClassificationCandidate[];
   classification_confidence: Confidence;
   reason: string;
-  classification_evidence: ClassificationEvidence[];
 }
 
 interface AnalysisResult {
@@ -73,7 +66,8 @@ interface AnalysisResult {
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Headers':
+    'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
   'Access-Control-Max-Age': '86400',
 };
@@ -81,19 +75,20 @@ const corsHeaders = {
 const MIN_INPUT_CHARS = 20;
 const MAX_INPUT_CHARS = 10000;
 const MAX_INPUT_LINES = 300;
+const MAX_REPEATED_CHAR_RUN = 20;
 const MIN_MEANINGFUL_CHAR_RATIO = 0.35;
 const MAX_DUPLICATE_WORD_RATIO = 0.75;
 const LONG_INPUT_WARNING_CHARS = 8000;
-const MAX_KEYWORDS = 30;
-const MAX_QUERY_TERMS_PER_KEYWORD = 5;
-const MAX_CANDIDATES_PER_QUERY = 12;
-const MAX_CANDIDATES_PER_SYSTEM = 8;
+const CLASSIFICATION_SEARCH_LIMIT = 30;
+const CANDIDATES_PER_SYSTEM = 3;
+const CANDIDATE_KEYWORD_LIMIT = 12;
+const CANDIDATE_SEARCH_CONCURRENCY = 3;
 const MODEL = Deno.env.get('OPENAI_MODEL') ?? 'gpt-4.1-mini';
 
 const NO_CREDITS_MESSAGE =
   '分析クレジットがありません。Test pack または Business pack を購入してください。';
 
-const keywordDraftSchema = {
+const responseSchema = {
   type: 'object',
   additionalProperties: false,
   required: ['language', 'keywords'],
@@ -101,41 +96,14 @@ const keywordDraftSchema = {
     language: { type: 'string', enum: ['en', 'ja'] },
     keywords: {
       type: 'array',
-      maxItems: MAX_KEYWORDS,
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['term', 'normalized_term', 'count', 'rank', 'search_terms', 'reason'],
-        properties: {
-          term: { type: 'string' },
-          normalized_term: { type: 'string' },
-          count: { type: 'integer', minimum: 1 },
-          rank: { type: 'integer', minimum: 1 },
-          search_terms: {
-            type: 'array',
-            minItems: 1,
-            maxItems: MAX_QUERY_TERMS_PER_KEYWORD,
-            items: { type: 'string' },
-          },
-          reason: { type: 'string' },
-        },
-      },
-    },
-  },
-} as const;
-
-const selectionSchema = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['keywords'],
-  properties: {
-    keywords: {
-      type: 'array',
-      maxItems: MAX_KEYWORDS,
+      maxItems: 40,
       items: {
         type: 'object',
         additionalProperties: false,
         required: [
+          'term',
+          'normalized_term',
+          'count',
           'rank',
           'ipc',
           'cpc',
@@ -145,12 +113,18 @@ const selectionSchema = {
           'reason',
         ],
         properties: {
+          term: { type: 'string' },
+          normalized_term: { type: 'string' },
+          count: { type: 'integer', minimum: 1 },
           rank: { type: 'integer', minimum: 1 },
           ipc: { type: 'array', items: { type: 'string' } },
           cpc: { type: 'array', items: { type: 'string' } },
           fi: { type: 'array', items: { type: 'string' } },
           f_term: { type: 'array', items: { type: 'string' } },
-          classification_confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+          classification_confidence: {
+            type: 'string',
+            enum: ['high', 'medium', 'low'],
+          },
           reason: { type: 'string' },
         },
       },
@@ -183,20 +157,22 @@ function validateText(body: AnalyzeRequest): string {
   const rawText = typeof body.text === 'string' ? body.text : body.input;
 
   if (typeof rawText !== 'string') {
-    throw new Error('Request body must include a string field named "text" or "input".');
+    throw new Error(
+      'Request body must include a string field named "text" or "input".',
+    );
   }
 
   const text = rawText.trim();
 
   if (text.length < MIN_INPUT_CHARS) {
     throw new Error(
-      `Text is too short. Please enter at least ${MIN_INPUT_CHARS} characters of meaningful technical text.`
+      `Text is too short. Please enter at least ${MIN_INPUT_CHARS} characters of meaningful technical text.`,
     );
   }
 
   if (text.length > MAX_INPUT_CHARS) {
     throw new Error(
-      `Text is too long. Limit input to ${MAX_INPUT_CHARS.toLocaleString()} characters.`
+      `Text is too long. Limit input to ${MAX_INPUT_CHARS.toLocaleString()} characters.`,
     );
   }
 
@@ -204,11 +180,16 @@ function validateText(body: AnalyzeRequest): string {
 
   if (lines.length > MAX_INPUT_LINES) {
     throw new Error(
-      `Text has too many lines. Limit input to ${MAX_INPUT_LINES.toLocaleString()} lines.`
+      `Text has too many lines. Limit input to ${MAX_INPUT_LINES.toLocaleString()} lines.`,
     );
   }
 
-  if (/([\s\S])\1{20,}/u.test(text)) {
+  const repeatedCharacterPattern = new RegExp(
+    `([\\s\\S])\\1{${MAX_REPEATED_CHAR_RUN},}`,
+    'u',
+  );
+
+  if (repeatedCharacterPattern.test(text)) {
     throw new Error('Text appears to contain excessive repeated characters.');
   }
 
@@ -243,390 +224,515 @@ function validateText(body: AnalyzeRequest): string {
   return text;
 }
 
-function uniqueNonEmpty(values: string[]): string[] {
-  return [...new Set(values.map((value) => value.trim()).filter(Boolean))];
+function normalizeClassificationCode(code: string): string {
+  return code.toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
-function normalizeCode(code: string): string {
-  return code.toUpperCase().replace(/\s+/g, '');
-}
-
-function candidateKey(system: ClassificationSystem, code: string): string {
-  return `${system}:${normalizeCode(code)}`;
-}
-
-async function extractKeywordDrafts(
-  text: string,
-  client: OpenAI,
-): Promise<{ language: PatentLanguage; keywords: KeywordDraft[] }> {
-  const response = await client.responses.create({
-    model: MODEL,
-    input: [
-      {
-        role: 'system',
-        content: [
-          {
-            type: 'input_text',
-            text: `You are a multilingual patent search analyst for English and Japanese technical documents.
-Return only structured JSON matching the schema.
-Tasks:
-- Detect whether the dominant input language is English (en) or Japanese (ja).
-- Extract meaningful technical patent keywords and noun phrases; exclude stopwords, legal boilerplate, and generic verbs.
-- Normalize synonyms into a canonical normalized_term.
-- Count direct occurrences and clear synonyms, then rank by descending frequency.
-- For each keyword, create one to five concise search_terms suitable for searching official IPC, CPC, FI, and F-term scheme titles and descriptions. Include English and Japanese equivalents when useful.
-- Do not generate classification codes. Classification codes will be selected only from official catalog records in a separate verification stage.
-- Give a concise reason grounded in the supplied patent text.`,
-          },
-        ],
-      },
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'input_text',
-            text: `Extract patent-search concepts from this text. UTF-8 Japanese content may be present.\n\n${text}`,
-          },
-        ],
-      },
-    ],
-    text: {
-      format: {
-        type: 'json_schema',
-        name: 'patent_keyword_drafts',
-        schema: keywordDraftSchema,
-        strict: true,
-      },
-    },
-  });
-
-  if (!response.output_text) {
-    throw new Error('OpenAI returned an empty keyword-extraction response.');
+function uniqueCodes(codes: unknown): string[] {
+  if (!Array.isArray(codes)) {
+    return [];
   }
 
-  const parsed = JSON.parse(response.output_text) as {
-    language: PatentLanguage;
-    keywords: KeywordDraft[];
-  };
+  const seen = new Set<string>();
+  const unique: string[] = [];
 
-  const keywords = parsed.keywords
-    .map((keyword) => ({
-      ...keyword,
-      term: keyword.term.trim(),
-      normalized_term: keyword.normalized_term.trim(),
-      count: Math.max(1, Math.trunc(keyword.count)),
-      rank: Math.max(1, Math.trunc(keyword.rank)),
-      search_terms: uniqueNonEmpty([
-        keyword.normalized_term,
-        keyword.term,
-        ...keyword.search_terms,
-      ]).slice(0, MAX_QUERY_TERMS_PER_KEYWORD),
-      reason: keyword.reason.trim(),
-    }))
-    .filter((keyword) => keyword.term && keyword.normalized_term)
-    .sort((a, b) => b.count - a.count || a.rank - b.rank)
-    .slice(0, MAX_KEYWORDS)
-    .map((keyword, index) => ({ ...keyword, rank: index + 1 }));
+  for (const value of codes) {
+    if (typeof value !== 'string') {
+      continue;
+    }
 
-  return { language: parsed.language, keywords };
+    const code = value.trim();
+    const normalizedCode = normalizeClassificationCode(code);
+
+    if (!code || !normalizedCode || seen.has(normalizedCode)) {
+      continue;
+    }
+
+    seen.add(normalizedCode);
+    unique.push(code);
+  }
+
+  return unique;
 }
 
-async function searchOfficialCandidates(
-  adminClient: ReturnType<typeof createClient>,
-  keyword: KeywordDraft,
-): Promise<OfficialClassificationCandidate[]> {
-  const merged = new Map<string, OfficialClassificationCandidate>();
+function normalizeResult(
+  result: AnalysisResult,
+  warning?: string,
+): AnalysisResult {
+  const normalizedKeywords = (Array.isArray(result.keywords)
+    ? result.keywords
+    : [])
+    .map((keyword) => {
+      const confidence: Confidence =
+        keyword.classification_confidence === 'high' ||
+        keyword.classification_confidence === 'medium' ||
+        keyword.classification_confidence === 'low'
+          ? keyword.classification_confidence
+          : 'low';
 
-  for (const query of keyword.search_terms) {
-    const { data, error } = await adminClient.rpc('search_classification_records', {
-      p_query: query,
-      p_system: null,
-      p_limit: MAX_CANDIDATES_PER_QUERY,
-    });
+      const ipc = uniqueCodes(keyword.ipc);
+      const cpc = uniqueCodes(keyword.cpc);
+      const fi = uniqueCodes(keyword.fi);
+      const fTerm = uniqueCodes(keyword.f_term);
+
+      return {
+        term: String(keyword.term ?? '').trim(),
+        normalized_term: String(keyword.normalized_term ?? '').trim(),
+        count: Math.max(1, Math.trunc(Number(keyword.count) || 1)),
+        rank: Math.max(1, Math.trunc(Number(keyword.rank) || 1)),
+        ipc: confidence === 'low' ? ipc.slice(0, 2) : ipc,
+        cpc: confidence === 'low' ? cpc.slice(0, 2) : cpc,
+        fi: confidence === 'low' ? fi.slice(0, 1) : fi,
+        f_term: confidence === 'low' ? fTerm.slice(0, 1) : fTerm,
+        classification_confidence: confidence,
+        reason: String(keyword.reason ?? '').trim(),
+      };
+    })
+    .filter((keyword) => keyword.term || keyword.normalized_term)
+    .sort((a, b) => b.count - a.count || a.rank - b.rank)
+    .map((keyword, index) => ({ ...keyword, rank: index + 1 }));
+
+  return {
+    language: result.language === 'ja' ? 'ja' : 'en',
+    keywords: normalizedKeywords,
+    ...(warning ? { warning } : {}),
+  };
+}
+
+function appendWarning(
+  currentWarning: string | undefined,
+  additionalWarning: string,
+): string {
+  return currentWarning
+    ? `${currentWarning} ${additionalWarning}`
+    : additionalWarning;
+}
+
+function buildAiSuggestedEvidence(
+  codes: string[],
+): ClassificationCodeEvidence[] {
+  return uniqueCodes(codes).map((code) => ({
+    code,
+    status: 'ai_suggested',
+  }));
+}
+
+async function loadCatalogRowsForCodes(
+  adminClient: SupabaseClient,
+  system: ClassificationSystem,
+  codes: string[],
+): Promise<Map<string, ClassificationCandidate>> {
+  const normalizedCodes = Array.from(
+    new Set(codes.map(normalizeClassificationCode).filter(Boolean)),
+  );
+  const rowsByCode = new Map<string, ClassificationCandidate>();
+
+  for (let start = 0; start < normalizedCodes.length; start += 100) {
+    const codeBatch = normalizedCodes.slice(start, start + 100);
+
+    const { data, error } = await adminClient
+      .from('classification_titles')
+      .select(
+        'system, code, normalized_code, title_en, title_ja, parent_code, hierarchy_level, edition',
+      )
+      .eq('system', system)
+      .in('normalized_code', codeBatch)
+      .order('edition', { ascending: false });
+
+    if (error) {
+      throw new Error(`${system} code lookup failed: ${error.message}`);
+    }
+
+    for (const rawRow of data ?? []) {
+      const row = rawRow as Omit<ClassificationCandidate, 'similarity_score'>;
+      const normalizedCode =
+        row.normalized_code || normalizeClassificationCode(row.code);
+
+      if (!rowsByCode.has(normalizedCode)) {
+        rowsByCode.set(normalizedCode, {
+          ...row,
+          system,
+          similarity_score: 0,
+        });
+      }
+    }
+  }
+
+  return rowsByCode;
+}
+
+function buildCodeEvidence(
+  codes: string[],
+  catalogRows: Map<string, ClassificationCandidate>,
+): ClassificationCodeEvidence[] {
+  return uniqueCodes(codes).map((code) => {
+    const row = catalogRows.get(normalizeClassificationCode(code));
+
+    if (!row) {
+      return {
+        code,
+        status: 'ai_suggested' as const,
+      };
+    }
+
+    return {
+      code,
+      status: 'database_verified' as const,
+      title_en: row.title_en,
+      title_ja: row.title_ja,
+      edition: row.edition,
+    };
+  });
+}
+
+function candidateTitle(candidate: ClassificationCandidate): string {
+  return `${candidate.title_en ?? ''} ${candidate.title_ja ?? ''}`
+    .trim()
+    .toLowerCase();
+}
+
+function calculateCandidateMatchScore(
+  candidate: ClassificationCandidate,
+  primarySearchTerm: string,
+  contextTerms: string[],
+  suggestedCodes: string[],
+): number {
+  const title = candidateTitle(candidate);
+  const query = primarySearchTerm.trim().toLowerCase();
+  const queryWords = query
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word.length >= 3);
+  const contextWords = Array.from(
+    new Set(
+      contextTerms.flatMap((term) =>
+        term
+          .toLowerCase()
+          .split(/[^a-z0-9]+/)
+          .filter((word) => word.length >= 4),
+      ),
+    ),
+  );
+  const suggestedPrefixes = suggestedCodes
+    .map(normalizeClassificationCode)
+    .filter(Boolean)
+    .map((code) => code.slice(0, Math.min(4, code.length)));
+  const normalizedCandidateCode = normalizeClassificationCode(candidate.code);
+
+  let score = Number(candidate.similarity_score) || 0;
+
+  if (query && title.includes(query)) {
+    score += 0.25;
+  }
+
+  const queryWordHits = queryWords.filter((word) => title.includes(word)).length;
+  score += Math.min(0.12, queryWordHits * 0.04);
+
+  const contextHits = contextWords.filter((word) => title.includes(word)).length;
+  score += Math.min(0.15, contextHits * 0.03);
+
+  if (
+    suggestedPrefixes.some(
+      (prefix) => prefix.length >= 3 && normalizedCandidateCode.startsWith(prefix),
+    )
+  ) {
+    score += 0.2;
+  }
+
+  return Math.max(0, Math.min(1, score));
+}
+
+async function searchClassificationCandidates(
+  adminClient: SupabaseClient,
+  searchTerms: string[],
+  system: ClassificationSystem,
+  contextTerms: string[],
+  suggestedCodes: string[],
+): Promise<ClassificationCandidate[]> {
+  const uniqueSearchTerms = Array.from(
+    new Set(searchTerms.map((term) => term.trim()).filter(Boolean)),
+  ).slice(0, 2);
+  const candidatesByCode = new Map<string, ClassificationCandidate>();
+
+  for (const searchText of uniqueSearchTerms) {
+    const { data, error } = await adminClient.rpc(
+      'search_classification_titles',
+      {
+        search_text: searchText,
+        requested_systems: [system],
+        result_limit: CLASSIFICATION_SEARCH_LIMIT,
+      },
+    );
 
     if (error) {
       throw new Error(
-        `Official classification catalog search failed: ${error.message}. Apply the classification catalog migration and import current official records before analyzing.`
+        `${system} candidate search failed: ${error.message}`,
       );
     }
 
-    for (const raw of (data ?? []) as Record<string, unknown>[]) {
-      const system = raw.system as ClassificationSystem;
-      const code = typeof raw.code === 'string' ? raw.code.trim() : '';
-      const title = typeof raw.title === 'string' ? raw.title.trim() : '';
+    for (const rawCandidate of data ?? []) {
+      const candidate = rawCandidate as ClassificationCandidate;
+      const normalizedCode = normalizeClassificationCode(candidate.code);
+      const previous = candidatesByCode.get(normalizedCode);
 
-      if (!['ipc', 'cpc', 'fi', 'f_term'].includes(system) || !code || !title) {
-        continue;
-      }
-
-      const candidate: OfficialClassificationCandidate = {
-        system,
-        code,
-        title,
-        description: typeof raw.description === 'string' ? raw.description : null,
-        edition: typeof raw.edition === 'string' ? raw.edition : 'unknown',
-        source_name: typeof raw.source_name === 'string' ? raw.source_name : 'Official classification source',
-        source_url: typeof raw.source_url === 'string' ? raw.source_url : '',
-        score: Number.isFinite(Number(raw.score)) ? Number(raw.score) : 0,
-      };
-      const key = candidateKey(system, code);
-      const current = merged.get(key);
-
-      if (!current || candidate.score > current.score) {
-        merged.set(key, candidate);
+      if (
+        !previous ||
+        Number(candidate.similarity_score) > Number(previous.similarity_score)
+      ) {
+        candidatesByCode.set(normalizedCode, candidate);
       }
     }
   }
 
-  const bySystem = new Map<ClassificationSystem, OfficialClassificationCandidate[]>();
+  const primarySearchTerm = uniqueSearchTerms[0] ?? '';
 
-  for (const candidate of merged.values()) {
-    const values = bySystem.get(candidate.system) ?? [];
-    values.push(candidate);
-    bySystem.set(candidate.system, values);
-  }
-
-  return (['ipc', 'cpc', 'fi', 'f_term'] as ClassificationSystem[]).flatMap((system) =>
-    (bySystem.get(system) ?? [])
-      .sort((a, b) => b.score - a.score || a.code.localeCompare(b.code))
-      .slice(0, MAX_CANDIDATES_PER_SYSTEM)
-  );
-}
-
-async function selectClassifications(
-  keywordDrafts: KeywordDraft[],
-  candidatesByRank: Map<number, OfficialClassificationCandidate[]>,
-  client: OpenAI,
-): Promise<KeywordSelection[]> {
-  const payload = keywordDrafts.map((keyword) => ({
-    rank: keyword.rank,
-    term: keyword.term,
-    normalized_term: keyword.normalized_term,
-    keyword_reason: keyword.reason,
-    official_candidates: (candidatesByRank.get(keyword.rank) ?? []).map((candidate) => ({
-      system: candidate.system,
-      code: candidate.code,
-      title: candidate.title,
-      description: candidate.description,
-      edition: candidate.edition,
-      source_name: candidate.source_name,
-      score: candidate.score,
-    })),
-  }));
-
-  const response = await client.responses.create({
-    model: MODEL,
-    input: [
-      {
-        role: 'system',
-        content: [
-          {
-            type: 'input_text',
-            text: `You are verifying patent classifications against an official classification catalog.
-Return only structured JSON matching the schema.
-Rules:
-- Select a code only when it appears verbatim in official_candidates for the same keyword and system.
-- Never invent, broaden, truncate, combine, or alter a code.
-- Prefer the most specific candidate whose official title or description directly matches the technical concept.
-- Select no more than three codes per system and keyword.
-- Leave an array empty when the official candidate evidence is weak or only tangential.
-- FI and F-term are Japanese search classifications; select them only when the official record directly supports the concept.
-- Confidence means confidence in the selected official-record match, not confidence in model memory.
-- Explain the selection or omission concisely.`,
-          },
-        ],
-      },
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'input_text',
-            text: `Select verified classifications for these keyword candidates:\n${JSON.stringify(payload)}`,
-          },
-        ],
-      },
-    ],
-    text: {
-      format: {
-        type: 'json_schema',
-        name: 'verified_patent_classifications',
-        schema: selectionSchema,
-        strict: true,
-      },
-    },
-  });
-
-  if (!response.output_text) {
-    throw new Error('OpenAI returned an empty classification-selection response.');
-  }
-
-  const parsed = JSON.parse(response.output_text) as { keywords: KeywordSelection[] };
-  return parsed.keywords;
-}
-
-function validatedCodes(
-  requestedCodes: string[],
-  system: ClassificationSystem,
-  candidates: OfficialClassificationCandidate[],
-): string[] {
-  const officialCodes = new Map(
-    candidates
-      .filter((candidate) => candidate.system === system)
-      .map((candidate) => [normalizeCode(candidate.code), candidate.code])
-  );
-
-  return uniqueNonEmpty(requestedCodes)
-    .map((code) => officialCodes.get(normalizeCode(code)))
-    .filter((code): code is string => Boolean(code))
-    .slice(0, 3);
-}
-
-function calculateConfidence(
-  requestedConfidence: Confidence,
-  selectedCodes: string[],
-  candidates: OfficialClassificationCandidate[],
-): Confidence {
-  if (selectedCodes.length === 0) {
-    return 'low';
-  }
-
-  const selectedKeys = new Set(selectedCodes.map(normalizeCode));
-  const scores = candidates
-    .filter((candidate) => selectedKeys.has(normalizeCode(candidate.code)))
-    .map((candidate) => candidate.score);
-  const minimumScore = scores.length > 0 ? Math.min(...scores) : 0;
-
-  if (minimumScore < 0.2) {
-    return 'low';
-  }
-
-  if (minimumScore < 0.42 && requestedConfidence === 'high') {
-    return 'medium';
-  }
-
-  return requestedConfidence;
-}
-
-function buildEvidence(
-  systemsAndCodes: Array<[ClassificationSystem, string[]]>,
-  candidates: OfficialClassificationCandidate[],
-): ClassificationEvidence[] {
-  const selectedKeys = new Set(
-    systemsAndCodes.flatMap(([system, codes]) =>
-      codes.map((code) => candidateKey(system, code))
-    )
-  );
-
-  return candidates
-    .filter((candidate) => selectedKeys.has(candidateKey(candidate.system, candidate.code)))
+  return Array.from(candidatesByCode.values())
     .map((candidate) => ({
-      system: candidate.system,
-      code: candidate.code,
-      title: candidate.title,
-      edition: candidate.edition,
-      source_name: candidate.source_name,
-      source_url: candidate.source_url,
-      match_score: Math.round(candidate.score * 1000) / 1000,
+      ...candidate,
+      match_score: calculateCandidateMatchScore(
+        candidate,
+        primarySearchTerm,
+        contextTerms,
+        suggestedCodes,
+      ),
     }))
-    .sort((a, b) => a.system.localeCompare(b.system) || a.code.localeCompare(b.code));
+    .filter(
+      (candidate) =>
+        (candidate.match_score ?? 0) >= 0.35 ||
+        candidateTitle(candidate).includes(primarySearchTerm.toLowerCase()),
+    )
+    .sort(
+      (a, b) =>
+        (b.match_score ?? 0) - (a.match_score ?? 0) ||
+        Number(b.similarity_score) - Number(a.similarity_score) ||
+        (a.hierarchy_level ?? 999) - (b.hierarchy_level ?? 999) ||
+        a.code.localeCompare(b.code),
+    )
+    .slice(0, CANDIDATES_PER_SYSTEM);
+}
+
+async function enrichAnalysisClassifications(
+  adminClient: SupabaseClient,
+  result: AnalysisResult,
+): Promise<AnalysisResult> {
+  let warning = result.warning;
+  let verificationFailed = false;
+
+  const allCodesBySystem: Record<ClassificationSystem, string[]> = {
+    IPC: result.keywords.flatMap((keyword) => keyword.ipc),
+    CPC: result.keywords.flatMap((keyword) => keyword.cpc),
+    FI: result.keywords.flatMap((keyword) => keyword.fi),
+  };
+
+  const catalogMaps: Partial<
+    Record<ClassificationSystem, Map<string, ClassificationCandidate>>
+  > = {};
+
+  const catalogResults = await Promise.allSettled(
+    (['IPC', 'CPC', 'FI'] as ClassificationSystem[]).map(
+      async (system) => ({
+        system,
+        rows: await loadCatalogRowsForCodes(
+          adminClient,
+          system,
+          allCodesBySystem[system],
+        ),
+      }),
+    ),
+  );
+
+  for (const catalogResult of catalogResults) {
+    if (catalogResult.status === 'fulfilled') {
+      catalogMaps[catalogResult.value.system] = catalogResult.value.rows;
+    } else {
+      verificationFailed = true;
+      console.error('Classification code lookup failed:', catalogResult.reason);
+    }
+  }
+
+  const enrichedKeywords: KeywordClassification[] = result.keywords.map(
+    (keyword) => ({
+      ...keyword,
+      ipc_evidence: catalogMaps.IPC
+        ? buildCodeEvidence(keyword.ipc, catalogMaps.IPC)
+        : buildAiSuggestedEvidence(keyword.ipc),
+      cpc_evidence: catalogMaps.CPC
+        ? buildCodeEvidence(keyword.cpc, catalogMaps.CPC)
+        : buildAiSuggestedEvidence(keyword.cpc),
+      fi_evidence: catalogMaps.FI
+        ? buildCodeEvidence(keyword.fi, catalogMaps.FI)
+        : buildAiSuggestedEvidence(keyword.fi),
+      f_term_evidence: buildAiSuggestedEvidence(keyword.f_term),
+      ipc_candidates: [],
+      cpc_candidates: [],
+      fi_candidates: [],
+    }),
+  );
+
+  const contextTerms = enrichedKeywords
+    .slice(0, CANDIDATE_KEYWORD_LIMIT)
+    .map((keyword) => keyword.normalized_term || keyword.term)
+    .filter(Boolean);
+  const candidateKeywordCount = Math.min(
+    enrichedKeywords.length,
+    CANDIDATE_KEYWORD_LIMIT,
+  );
+
+  for (
+    let start = 0;
+    start < candidateKeywordCount;
+    start += CANDIDATE_SEARCH_CONCURRENCY
+  ) {
+    const keywordIndexes = Array.from(
+      {
+        length: Math.min(
+          CANDIDATE_SEARCH_CONCURRENCY,
+          candidateKeywordCount - start,
+        ),
+      },
+      (_, offset) => start + offset,
+    );
+
+    const keywordResults = await Promise.all(
+      keywordIndexes.map(async (keywordIndex) => {
+        const keyword = enrichedKeywords[keywordIndex];
+        const searchTerms = [keyword.normalized_term, keyword.term];
+
+        const systemResults = await Promise.allSettled([
+          searchClassificationCandidates(
+            adminClient,
+            searchTerms,
+            'IPC',
+            contextTerms,
+            keyword.ipc,
+          ),
+          searchClassificationCandidates(
+            adminClient,
+            searchTerms,
+            'CPC',
+            contextTerms,
+            keyword.cpc,
+          ),
+          searchClassificationCandidates(
+            adminClient,
+            searchTerms,
+            'FI',
+            contextTerms,
+            keyword.fi,
+          ),
+        ]);
+
+        return { keywordIndex, systemResults };
+      }),
+    );
+
+    for (const { keywordIndex, systemResults } of keywordResults) {
+      const keyword = enrichedKeywords[keywordIndex];
+      const keys: Array<
+        'ipc_candidates' | 'cpc_candidates' | 'fi_candidates'
+      > = ['ipc_candidates', 'cpc_candidates', 'fi_candidates'];
+
+      systemResults.forEach((systemResult, index) => {
+        if (systemResult.status === 'fulfilled') {
+          keyword[keys[index]] = systemResult.value;
+        } else {
+          verificationFailed = true;
+          console.error(
+            'Classification candidate search failed:',
+            systemResult.reason,
+          );
+        }
+      });
+    }
+  }
+
+  if (verificationFailed) {
+    warning = appendWarning(
+      warning,
+      'Some IPC/CPC/FI database checks were unavailable. Affected codes remain labeled AI suggested.',
+    );
+  }
+
+  if (enrichedKeywords.length > CANDIDATE_KEYWORD_LIMIT) {
+    warning = appendWarning(
+      warning,
+      `Database candidate retrieval was limited to the top ${CANDIDATE_KEYWORD_LIMIT} keywords to control response time.`,
+    );
+  }
+
+  return {
+    ...result,
+    keywords: enrichedKeywords,
+    ...(warning ? { warning } : {}),
+  };
 }
 
 async function analyzePatentText(
   text: string,
   apiKey: string,
-  adminClient: ReturnType<typeof createClient>,
 ): Promise<AnalysisResult> {
   const client = new OpenAI({ apiKey });
-  const draft = await extractKeywordDrafts(text, client);
-  const candidatesByRank = new Map<number, OfficialClassificationCandidate[]>();
+  const warning =
+    text.length > LONG_INPUT_WARNING_CHARS
+      ? 'Long input detected. The model analyzed the provided text in one pass; splitting a long document can improve recall and cost control.'
+      : undefined;
 
-  for (const keyword of draft.keywords) {
-    candidatesByRank.set(
-      keyword.rank,
-      await searchOfficialCandidates(adminClient, keyword)
-    );
-  }
-
-  const totalCandidateCount = [...candidatesByRank.values()].reduce(
-    (sum, values) => sum + values.length,
-    0
-  );
-
-  if (totalCandidateCount === 0) {
-    throw new Error(
-      'The official classification catalog contains no searchable records. Import current WIPO IPC, CPC, and JPO FI/F-term records before analyzing.'
-    );
-  }
-
-  const selections = await selectClassifications(draft.keywords, candidatesByRank, client);
-  const selectionsByRank = new Map(selections.map((selection) => [selection.rank, selection]));
-
-  const keywords = draft.keywords.map((keyword) => {
-    const candidates = candidatesByRank.get(keyword.rank) ?? [];
-    const selection = selectionsByRank.get(keyword.rank) ?? {
-      rank: keyword.rank,
-      ipc: [],
-      cpc: [],
-      fi: [],
-      f_term: [],
-      classification_confidence: 'low' as Confidence,
-      reason: 'No classification was selected from the official candidates.',
-    };
-    const ipc = validatedCodes(selection.ipc, 'ipc', candidates);
-    const cpc = validatedCodes(selection.cpc, 'cpc', candidates);
-    const fi = validatedCodes(selection.fi, 'fi', candidates);
-    const fTerm = validatedCodes(selection.f_term, 'f_term', candidates);
-    const allSelectedCodes = [...ipc, ...cpc, ...fi, ...fTerm];
-
-    return {
-      term: keyword.term,
-      normalized_term: keyword.normalized_term,
-      count: keyword.count,
-      rank: keyword.rank,
-      ipc,
-      cpc,
-      fi,
-      f_term: fTerm,
-      classification_confidence: calculateConfidence(
-        selection.classification_confidence,
-        allSelectedCodes,
-        candidates
-      ),
-      reason: `${keyword.reason} ${selection.reason}`.trim(),
-      classification_evidence: buildEvidence(
-        [
-          ['ipc', ipc],
-          ['cpc', cpc],
-          ['fi', fi],
-          ['f_term', fTerm],
+  const response = await client.responses.create({
+    model: MODEL,
+    input: [
+      {
+        role: 'system',
+        content: [
+          {
+            type: 'input_text',
+            text: `You are a multilingual patent analyst for English and Japanese technical documents.
+Return only structured JSON matching the schema.
+Tasks:
+- Detect whether the dominant input language is English (en) or Japanese (ja).
+- Extract meaningful technical patent keywords and noun phrases; exclude stopwords, legal boilerplate, and generic verbs.
+- Normalize synonyms into a concise canonical normalized_term.
+- For Japanese input, preserve Japanese wording in term and use an English technical phrase in normalized_term whenever possible.
+- Count occurrences across direct terms and clear synonyms; rank by descending frequency.
+- Suggest likely IPC, CPC, FI, and F-term codes only when supportable.
+- Include a concise, specific reason grounded in the input text.
+- Use low confidence when classification support is weak.
+- Do not claim that any code is database verified. The server performs database verification after your response.
+- Do not invent overly specific FI or F-term codes. Leave arrays empty when a code cannot be responsibly inferred.`,
+          },
         ],
-        candidates
-      ),
-    };
+      },
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'input_text',
+            text: `Analyze this patent text. UTF-8 Japanese content may be present.\n\n${text}`,
+          },
+        ],
+      },
+    ],
+    text: {
+      format: {
+        type: 'json_schema',
+        name: 'patent_keyword_classification_analysis',
+        schema: responseSchema,
+        strict: true,
+      },
+    },
   });
 
-  const warnings: string[] = [];
+  const outputText = response.output_text;
 
-  if (text.length > LONG_INPUT_WARNING_CHARS) {
-    warnings.push(
-      'Long input detected. For production-scale documents, chunking can improve keyword recall and cost control.'
-    );
+  if (!outputText) {
+    throw new Error('OpenAI returned an empty response.');
   }
 
-  if (keywords.some((keyword) => keyword.classification_evidence.length === 0)) {
-    warnings.push(
-      'Some keywords had no sufficiently supported code in the imported official classification catalog.'
-    );
-  }
-
-  return {
-    language: draft.language,
-    keywords,
-    ...(warnings.length > 0 ? { warning: warnings.join(' ') } : {}),
-  };
+  return normalizeResult(
+    JSON.parse(outputText) as AnalysisResult,
+    warning,
+  );
 }
 
-Deno.serve(async (request) => {
+Deno.serve(async (request: Request) => {
   if (request.method === 'OPTIONS') {
     return new Response('ok', {
       status: 200,
@@ -635,18 +741,27 @@ Deno.serve(async (request) => {
   }
 
   if (request.method !== 'POST') {
-    return jsonResponse({ error: 'Method not allowed. Use POST.' }, { status: 405 });
+    return jsonResponse(
+      { error: 'Method not allowed. Use POST.' },
+      { status: 405 },
+    );
   }
 
   try {
     const apiKey = getRequiredEnv('OPENAI_API_KEY');
     const supabaseUrl = getRequiredEnv('SUPABASE_URL');
     const supabaseAnonKey = getRequiredEnv('SUPABASE_ANON_KEY');
-    const supabaseServiceRoleKey = getRequiredEnv('SUPABASE_SERVICE_ROLE_KEY');
+    const supabaseServiceRoleKey = getRequiredEnv(
+      'SUPABASE_SERVICE_ROLE_KEY',
+    );
+
     const authHeader = request.headers.get('Authorization');
 
     if (!authHeader) {
-      return jsonResponse({ error: 'Authentication required.' }, { status: 401 });
+      return jsonResponse(
+        { error: 'Authentication required.' },
+        { status: 401 },
+      );
     }
 
     const authClient = createClient(supabaseUrl, supabaseAnonKey, {
@@ -654,6 +769,10 @@ Deno.serve(async (request) => {
         headers: {
           Authorization: authHeader,
         },
+      },
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
       },
     });
 
@@ -663,15 +782,22 @@ Deno.serve(async (request) => {
     } = await authClient.auth.getUser();
 
     if (userError || !user) {
-      return jsonResponse({ error: 'Authentication required.' }, { status: 401 });
+      return jsonResponse(
+        { error: 'Authentication required.' },
+        { status: 401 },
+      );
     }
 
-    const adminClient = createClient(supabaseUrl, supabaseServiceRoleKey, {
-      auth: {
-        persistSession: false,
-        autoRefreshToken: false,
+    const adminClient = createClient(
+      supabaseUrl,
+      supabaseServiceRoleKey,
+      {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+        },
       },
-    });
+    );
 
     const { data: creditRow, error: creditError } = await adminClient
       .from('user_credit_balances')
@@ -691,20 +817,24 @@ Deno.serve(async (request) => {
           error: NO_CREDITS_MESSAGE,
           remainingCredits: 0,
         },
-        { status: 402 }
+        { status: 402 },
       );
     }
 
     const body = (await request.json()) as AnalyzeRequest;
     const text = validateText(body);
-    const result = await analyzePatentText(text, apiKey, adminClient);
+    const aiResult = await analyzePatentText(text, apiKey);
+    const result = await enrichAnalysisClassifications(
+      adminClient,
+      aiResult,
+    );
 
     const { data: consumed, error: consumeError } = await adminClient.rpc(
       'consume_analysis_credit',
       {
         p_user_id: user.id,
         p_source: 'analysis',
-      }
+      },
     );
 
     if (consumeError) {
@@ -717,25 +847,35 @@ Deno.serve(async (request) => {
           error: NO_CREDITS_MESSAGE,
           remainingCredits: 0,
         },
-        { status: 402 }
+        { status: 402 },
       );
     }
 
-    const { data: updatedCreditRow, error: updatedCreditError } = await adminClient
+    const {
+      data: updatedCreditRow,
+      error: updatedCreditError,
+    } = await adminClient
       .from('user_credit_balances')
       .select('remaining_credits')
       .eq('user_id', user.id)
       .maybeSingle();
 
     if (updatedCreditError) {
-      return jsonResponse({ error: updatedCreditError.message }, { status: 500 });
+      return jsonResponse(
+        { error: updatedCreditError.message },
+        { status: 500 },
+      );
     }
 
-    const remainingCredits = Number(updatedCreditRow?.remaining_credits ?? 0);
+    const remainingCredits = Number(
+      updatedCreditRow?.remaining_credits ?? 0,
+    );
 
     return jsonResponse({
       ...result,
-      remainingCredits: Number.isFinite(remainingCredits) ? remainingCredits : 0,
+      remainingCredits: Number.isFinite(remainingCredits)
+        ? remainingCredits
+        : 0,
     });
   } catch (error) {
     console.error('Analyze Edge Function failed:', error);
@@ -744,12 +884,7 @@ Deno.serve(async (request) => {
       error instanceof Error
         ? error.message
         : 'Failed to analyze patent text.';
-    const status = message.includes('too long')
-      ? 413
-      : message.includes('official classification catalog') ||
-          message.includes('classification catalog migration')
-        ? 503
-        : 400;
+    const status = message.includes('too long') ? 413 : 400;
 
     return jsonResponse({ error: message }, { status });
   }

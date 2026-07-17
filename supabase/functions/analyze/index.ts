@@ -14,6 +14,7 @@ type ClassificationVerificationStatus =
 interface AnalyzeRequest {
   text?: unknown;
   input?: unknown;
+  request_id?: unknown;
 }
 
 interface ClassificationCodeEvidence {
@@ -61,6 +62,7 @@ interface AnalysisResult {
   language: PatentLanguage;
   keywords: KeywordClassification[];
   warning?: string;
+  requestId?: string;
   remainingCredits?: number;
 }
 
@@ -152,7 +154,41 @@ function getRequiredEnv(name: string): string {
 
   return value;
 }
+class HttpError extends Error {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
 
+function validateRequestId(value: unknown): string {
+  if (
+    typeof value !== 'string' ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      value,
+    )
+  ) {
+    throw new HttpError(
+      400,
+      'A valid request_id is required.',
+    );
+  }
+
+  return value;
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(value),
+  );
+
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
 function validateText(body: AnalyzeRequest): string {
   const rawText = typeof body.text === 'string' ? body.text : body.input;
 
@@ -265,8 +301,8 @@ function normalizeResult(
     .map((keyword) => {
       const confidence: Confidence =
         keyword.classification_confidence === 'high' ||
-        keyword.classification_confidence === 'medium' ||
-        keyword.classification_confidence === 'low'
+          keyword.classification_confidence === 'medium' ||
+          keyword.classification_confidence === 'low'
           ? keyword.classification_confidence
           : 'low';
 
@@ -515,63 +551,76 @@ async function enrichAnalysisClassifications(
   result: AnalysisResult,
 ): Promise<AnalysisResult> {
   let warning = result.warning;
-  let verificationFailed = false;
 
-  const allCodesBySystem: Record<ClassificationSystem, string[]> = {
-    IPC: result.keywords.flatMap((keyword) => keyword.ipc),
-    CPC: result.keywords.flatMap((keyword) => keyword.cpc),
-    FI: result.keywords.flatMap((keyword) => keyword.fi),
+  const allCodesBySystem: Record<
+    ClassificationSystem,
+    string[]
+  > = {
+    IPC: result.keywords.flatMap(
+      (keyword) => keyword.ipc,
+    ),
+    CPC: result.keywords.flatMap(
+      (keyword) => keyword.cpc,
+    ),
+    FI: result.keywords.flatMap(
+      (keyword) => keyword.fi,
+    ),
   };
 
-  const catalogMaps: Partial<
-    Record<ClassificationSystem, Map<string, ClassificationCandidate>>
-  > = {};
-
-  const catalogResults = await Promise.allSettled(
-    (['IPC', 'CPC', 'FI'] as ClassificationSystem[]).map(
-      async (system) => ({
+  const catalogResults = await Promise.all(
+    (
+      ['IPC', 'CPC', 'FI'] as ClassificationSystem[]
+    ).map(async (system) => ({
+      system,
+      rows: await loadCatalogRowsForCodes(
+        adminClient,
         system,
-        rows: await loadCatalogRowsForCodes(
-          adminClient,
-          system,
-          allCodesBySystem[system],
-        ),
-      }),
-    ),
+        allCodesBySystem[system],
+      ),
+    })),
   );
 
-  for (const catalogResult of catalogResults) {
-    if (catalogResult.status === 'fulfilled') {
-      catalogMaps[catalogResult.value.system] = catalogResult.value.rows;
-    } else {
-      verificationFailed = true;
-      console.error('Classification code lookup failed:', catalogResult.reason);
-    }
-  }
+  const catalogMaps = Object.fromEntries(
+    catalogResults.map(({ system, rows }) => [
+      system,
+      rows,
+    ]),
+  ) as Record<
+    ClassificationSystem,
+    Map<string, ClassificationCandidate>
+  >;
 
-  const enrichedKeywords: KeywordClassification[] = result.keywords.map(
-    (keyword) => ({
+  const enrichedKeywords: KeywordClassification[] =
+    result.keywords.map((keyword) => ({
       ...keyword,
-      ipc_evidence: catalogMaps.IPC
-        ? buildCodeEvidence(keyword.ipc, catalogMaps.IPC)
-        : buildAiSuggestedEvidence(keyword.ipc),
-      cpc_evidence: catalogMaps.CPC
-        ? buildCodeEvidence(keyword.cpc, catalogMaps.CPC)
-        : buildAiSuggestedEvidence(keyword.cpc),
-      fi_evidence: catalogMaps.FI
-        ? buildCodeEvidence(keyword.fi, catalogMaps.FI)
-        : buildAiSuggestedEvidence(keyword.fi),
-      f_term_evidence: buildAiSuggestedEvidence(keyword.f_term),
+      ipc_evidence: buildCodeEvidence(
+        keyword.ipc,
+        catalogMaps.IPC,
+      ),
+      cpc_evidence: buildCodeEvidence(
+        keyword.cpc,
+        catalogMaps.CPC,
+      ),
+      fi_evidence: buildCodeEvidence(
+        keyword.fi,
+        catalogMaps.FI,
+      ),
+      f_term_evidence: buildAiSuggestedEvidence(
+        keyword.f_term,
+      ),
       ipc_candidates: [],
       cpc_candidates: [],
       fi_candidates: [],
-    }),
-  );
+    }));
 
   const contextTerms = enrichedKeywords
     .slice(0, CANDIDATE_KEYWORD_LIMIT)
-    .map((keyword) => keyword.normalized_term || keyword.term)
+    .map(
+      (keyword) =>
+        keyword.normalized_term || keyword.term,
+    )
     .filter(Boolean);
+
   const candidateKeywordCount = Math.min(
     enrichedKeywords.length,
     CANDIDATE_KEYWORD_LIMIT,
@@ -594,10 +643,19 @@ async function enrichAnalysisClassifications(
 
     const keywordResults = await Promise.all(
       keywordIndexes.map(async (keywordIndex) => {
-        const keyword = enrichedKeywords[keywordIndex];
-        const searchTerms = [keyword.normalized_term, keyword.term];
+        const keyword =
+          enrichedKeywords[keywordIndex];
 
-        const systemResults = await Promise.allSettled([
+        const searchTerms = [
+          keyword.normalized_term,
+          keyword.term,
+        ];
+
+        const [
+          ipcCandidates,
+          cpcCandidates,
+          fiCandidates,
+        ] = await Promise.all([
           searchClassificationCandidates(
             adminClient,
             searchTerms,
@@ -621,38 +679,34 @@ async function enrichAnalysisClassifications(
           ),
         ]);
 
-        return { keywordIndex, systemResults };
+        return {
+          keywordIndex,
+          ipcCandidates,
+          cpcCandidates,
+          fiCandidates,
+        };
       }),
     );
 
-    for (const { keywordIndex, systemResults } of keywordResults) {
-      const keyword = enrichedKeywords[keywordIndex];
-      const keys: Array<
-        'ipc_candidates' | 'cpc_candidates' | 'fi_candidates'
-      > = ['ipc_candidates', 'cpc_candidates', 'fi_candidates'];
+    for (const keywordResult of keywordResults) {
+      const keyword =
+        enrichedKeywords[keywordResult.keywordIndex];
 
-      systemResults.forEach((systemResult, index) => {
-        if (systemResult.status === 'fulfilled') {
-          keyword[keys[index]] = systemResult.value;
-        } else {
-          verificationFailed = true;
-          console.error(
-            'Classification candidate search failed:',
-            systemResult.reason,
-          );
-        }
-      });
+      keyword.ipc_candidates =
+        keywordResult.ipcCandidates;
+
+      keyword.cpc_candidates =
+        keywordResult.cpcCandidates;
+
+      keyword.fi_candidates =
+        keywordResult.fiCandidates;
     }
   }
 
-  if (verificationFailed) {
-    warning = appendWarning(
-      warning,
-      'Some IPC/CPC/FI database checks were unavailable. Affected codes remain labeled AI suggested.',
-    );
-  }
-
-  if (enrichedKeywords.length > CANDIDATE_KEYWORD_LIMIT) {
+  if (
+    enrichedKeywords.length >
+    CANDIDATE_KEYWORD_LIMIT
+  ) {
     warning = appendWarning(
       warning,
       `Database candidate retrieval was limited to the top ${CANDIDATE_KEYWORD_LIMIT} keywords to control response time.`,
@@ -665,7 +719,6 @@ async function enrichAnalysisClassifications(
     ...(warning ? { warning } : {}),
   };
 }
-
 async function analyzePatentText(
   text: string,
   apiKey: string,
@@ -823,19 +876,38 @@ Deno.serve(async (request: Request) => {
 
     const body = (await request.json()) as AnalyzeRequest;
     const text = validateText(body);
+    const requestId = validateRequestId(body.request_id);
+    const inputHash = await sha256Hex(text);
     const aiResult = await analyzePatentText(text, apiKey);
-    const result = await enrichAnalysisClassifications(
-      adminClient,
-      aiResult,
-    );
+    let result: AnalysisResult;
 
-    const { data: consumed, error: consumeError } = await adminClient.rpc(
-      'consume_analysis_credit',
-      {
-        p_user_id: user.id,
-        p_source: 'analysis',
-      },
-    );
+    try {
+      result = await enrichAnalysisClassifications(
+        adminClient,
+        aiResult,
+      );
+    } catch (classificationError) {
+      console.error(
+        'Classification enrichment failed:',
+        classificationError,
+      );
+
+      throw new HttpError(
+        503,
+        'Classification database verification is temporarily unavailable. No credit was consumed.',
+      );
+    }
+
+    const { data: consumed, error: consumeError } =
+      await adminClient.rpc(
+        'consume_analysis_credit_once',
+        {
+          p_user_id: user.id,
+          p_source: 'analysis',
+          p_request_id: requestId,
+          p_input_hash: inputHash,
+        },
+      );
 
     if (consumeError) {
       return jsonResponse({ error: consumeError.message }, { status: 500 });
@@ -873,6 +945,7 @@ Deno.serve(async (request: Request) => {
 
     return jsonResponse({
       ...result,
+      requestId,
       remainingCredits: Number.isFinite(remainingCredits)
         ? remainingCredits
         : 0,
@@ -884,7 +957,12 @@ Deno.serve(async (request: Request) => {
       error instanceof Error
         ? error.message
         : 'Failed to analyze patent text.';
-    const status = message.includes('too long') ? 413 : 400;
+    const status =
+      error instanceof HttpError
+        ? error.status
+        : message.includes('too long')
+          ? 413
+          : 500;
 
     return jsonResponse({ error: message }, { status });
   }

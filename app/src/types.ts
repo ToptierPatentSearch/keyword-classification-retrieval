@@ -53,5 +53,6 @@ export interface AnalysisResult {
   language: PatentLanguage;
   keywords: KeywordClassification[];
   warning?: string;
+  requestId?: string;
   remainingCredits?: number;
 }

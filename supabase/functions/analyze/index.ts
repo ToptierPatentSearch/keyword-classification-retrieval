@@ -15,6 +15,7 @@ interface AnalyzeRequest {
   text?: unknown;
   input?: unknown;
   request_id?: unknown;
+  selected_keywords?: unknown;
 }
 
 interface ClassificationCodeEvidence {
@@ -177,6 +178,28 @@ function validateRequestId(value: unknown): string {
   }
 
   return value;
+}
+
+function validateSelectedKeywords(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    throw new HttpError(
+      400,
+      'selected_keywords must be an array.',
+    );
+  }
+
+  const keywords = value.map((item) => {
+    if (typeof item !== 'string' || !item.trim()) {
+      throw new HttpError(
+        400,
+        'Every selected keyword must be a nonempty string.',
+      );
+    }
+
+    return item.trim();
+  });
+
+  return Array.from(new Set(keywords)).slice(0, 100);
 }
 
 async function sha256Hex(value: string): Promise<string> {
@@ -722,6 +745,7 @@ async function enrichAnalysisClassifications(
 async function analyzePatentText(
   text: string,
   apiKey: string,
+  selectedKeywords: string[],
 ): Promise<AnalysisResult> {
   const client = new OpenAI({ apiKey });
   const warning =
@@ -758,7 +782,13 @@ Tasks:
         content: [
           {
             type: 'input_text',
-            text: `Analyze this patent text. UTF-8 Japanese content may be present.\n\n${text}`,
+            text: `Analyze this patent text. UTF-8 Japanese content may be present.
+
+Selected keywords that must receive particular consideration:
+${selectedKeywords.join(', ')}
+
+Patent text:
+${text}`,
           },
         ],
       },
@@ -877,8 +907,20 @@ Deno.serve(async (request: Request) => {
     const body = (await request.json()) as AnalyzeRequest;
     const text = validateText(body);
     const requestId = validateRequestId(body.request_id);
-    const inputHash = await sha256Hex(text);
-    const aiResult = await analyzePatentText(text, apiKey);
+    const selectedKeywords = validateSelectedKeywords(
+      body.selected_keywords,
+    );
+    const inputHash = await sha256Hex(
+      JSON.stringify({
+        text,
+        selected_keywords: selectedKeywords,
+      }),
+    );
+    const aiResult = await analyzePatentText(
+      text,
+      apiKey,
+      selectedKeywords,
+    );
     let result: AnalysisResult;
 
     try {

@@ -645,6 +645,7 @@ export default function App() {
           body: {
             input: trimmedText,
             request_id: requestId,
+            selected_keywords: [],
           },
         });
 

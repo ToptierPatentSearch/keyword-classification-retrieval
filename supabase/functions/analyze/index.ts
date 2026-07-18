@@ -67,12 +67,6 @@ interface AnalysisResult {
   remainingCredits?: number;
 }
 
-interface CreditConsumptionResult {
-  consumed: boolean;
-  remaining_credits: number;
-  replayed: boolean;
-}
-
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers':
@@ -152,12 +146,7 @@ function jsonResponse(body: unknown, init: ResponseInit = {}) {
   });
 }
 
-type AnalysisAuditOutcome =
-  | 'started'
-  | 'ready'
-  | 'succeeded'
-  | 'failed'
-  | 'rejected';
+type AnalysisAuditOutcome = 'started' | 'succeeded' | 'failed' | 'rejected';
 
 interface AnalysisAuditDetails {
   stage: string;
@@ -168,7 +157,6 @@ interface AnalysisAuditDetails {
   selected_keyword_count?: number;
   result_keyword_count?: number;
   remaining_credits?: number;
-  replayed?: boolean;
   status_code?: number;
   error_name?: string;
   error_message?: string;
@@ -253,40 +241,6 @@ function validateSelectedKeywords(value: unknown): string[] {
   });
 
   return Array.from(new Set(keywords)).slice(0, 100);
-}
-
-function parseCreditConsumptionResult(
-  value: unknown,
-): CreditConsumptionResult {
-  const row = Array.isArray(value) ? value[0] : value;
-
-  if (!row || typeof row !== 'object') {
-    throw new HttpError(
-      503,
-      'Credit finalization is temporarily unavailable. Retry the same request; idempotency prevents a duplicate charge.',
-    );
-  }
-
-  const record = row as Record<string, unknown>;
-  const remainingCredits = Number(record.remaining_credits);
-
-  if (
-    typeof record.consumed !== 'boolean' ||
-    typeof record.replayed !== 'boolean' ||
-    !Number.isInteger(remainingCredits) ||
-    remainingCredits < 0
-  ) {
-    throw new HttpError(
-      503,
-      'Credit finalization returned an invalid response. Retry the same request; idempotency prevents a duplicate charge.',
-    );
-  }
-
-  return {
-    consumed: record.consumed,
-    remaining_credits: remainingCredits,
-    replayed: record.replayed,
-  };
 }
 
 async function sha256Hex(value: string): Promise<string> {
@@ -443,60 +397,6 @@ function normalizeResult(
     keywords: normalizedKeywords,
     ...(warning ? { warning } : {}),
   };
-}
-
-function validateAnalysisReadyForCharge(result: AnalysisResult): void {
-  const validLanguage = result.language === 'en' || result.language === 'ja';
-  const validKeywordCount =
-    Array.isArray(result.keywords) &&
-    result.keywords.length > 0 &&
-    result.keywords.length <= 40;
-
-  const validKeywords =
-    validKeywordCount &&
-    result.keywords.every((keyword) =>
-      Boolean(keyword.term.trim()) &&
-      Boolean(keyword.normalized_term.trim()) &&
-      Number.isInteger(keyword.count) &&
-      keyword.count > 0 &&
-      Number.isInteger(keyword.rank) &&
-      keyword.rank > 0 &&
-      Array.isArray(keyword.ipc) &&
-      Array.isArray(keyword.cpc) &&
-      Array.isArray(keyword.fi) &&
-      Array.isArray(keyword.f_term) &&
-      Array.isArray(keyword.ipc_evidence) &&
-      Array.isArray(keyword.cpc_evidence) &&
-      Array.isArray(keyword.fi_evidence) &&
-      Array.isArray(keyword.f_term_evidence) &&
-      Array.isArray(keyword.ipc_candidates) &&
-      Array.isArray(keyword.cpc_candidates) &&
-      Array.isArray(keyword.fi_candidates) &&
-      (
-        keyword.classification_confidence === 'high' ||
-        keyword.classification_confidence === 'medium' ||
-        keyword.classification_confidence === 'low'
-      ) &&
-      Boolean(keyword.reason.trim())
-    );
-
-  if (!validLanguage || !validKeywords) {
-    throw new HttpError(
-      502,
-      'Analysis did not produce a complete valid result. No credit was consumed.',
-    );
-  }
-
-  try {
-    JSON.stringify(result);
-  } catch (serializationError) {
-    console.error('Analysis response serialization check failed:', serializationError);
-
-    throw new HttpError(
-      502,
-      'Analysis result could not be prepared for delivery. No credit was consumed.',
-    );
-  }
 }
 
 function appendWarning(
@@ -1055,12 +955,15 @@ Deno.serve(async (request: Request) => {
       .maybeSingle();
 
     if (creditError) {
-      console.error('Credit availability check failed:', creditError);
+      logAnalysisAudit('failed', {
+        stage: auditStage,
+        user_id: auditUserId,
+        status_code: 500,
+        error_message: creditError.message,
+        duration_ms: Date.now() - analysisStartedAt,
+      });
 
-      throw new HttpError(
-        503,
-        'Credit database is temporarily unavailable. No credit was consumed.',
-      );
+      return jsonResponse({ error: creditError.message }, { status: 500 });
     }
 
     const currentCredits = Number(creditRow?.remaining_credits ?? 0);
@@ -1138,31 +1041,10 @@ Deno.serve(async (request: Request) => {
       );
     }
 
-    auditStage = 'pre_charge_validation';
-    validateAnalysisReadyForCharge(result);
-
-    const preparedResponse = {
-      ...result,
-      requestId,
-    };
-
-    JSON.stringify(preparedResponse);
-
-    logAnalysisAudit('ready', {
-      stage: 'ready_for_charge',
-      user_id: auditUserId,
-      request_id: auditRequestId,
-      input_hash: auditInputHash,
-      input_characters: auditInputCharacters,
-      selected_keyword_count: auditSelectedKeywordCount,
-      result_keyword_count: result.keywords.length,
-      duration_ms: Date.now() - analysisStartedAt,
-    });
-
     auditStage = 'credit_consumption';
-    const { data: consumptionData, error: consumeError } =
+    const { data: consumed, error: consumeError } =
       await adminClient.rpc(
-        'consume_analysis_credit_once_v2',
+        'consume_analysis_credit_once',
         {
           p_user_id: user.id,
           p_source: 'analysis',
@@ -1172,28 +1054,22 @@ Deno.serve(async (request: Request) => {
       );
 
     if (consumeError) {
-      console.error('Atomic credit finalization failed:', consumeError);
+      logAnalysisAudit('failed', {
+        stage: auditStage,
+        user_id: auditUserId,
+        request_id: auditRequestId,
+        input_hash: auditInputHash,
+        input_characters: auditInputCharacters,
+        selected_keyword_count: auditSelectedKeywordCount,
+        status_code: 500,
+        error_message: consumeError.message,
+        duration_ms: Date.now() - analysisStartedAt,
+      });
 
-      if (
-        consumeError.message.includes(
-          'request_id was previously used with different input',
-        )
-      ) {
-        throw new HttpError(
-          409,
-          'request_id was previously used with different input.',
-        );
-      }
-
-      throw new HttpError(
-        503,
-        'Credit finalization is temporarily unavailable. Retry the same request; idempotency prevents a duplicate charge.',
-      );
+      return jsonResponse({ error: consumeError.message }, { status: 500 });
     }
 
-    const consumption = parseCreditConsumptionResult(consumptionData);
-
-    if (!consumption.consumed) {
+    if (!consumed) {
       logAnalysisAudit('rejected', {
         stage: auditStage,
         user_id: auditUserId,
@@ -1201,7 +1077,7 @@ Deno.serve(async (request: Request) => {
         input_hash: auditInputHash,
         input_characters: auditInputCharacters,
         selected_keyword_count: auditSelectedKeywordCount,
-        remaining_credits: consumption.remaining_credits,
+        remaining_credits: 0,
         status_code: 402,
         error_message: 'Credit consumption was rejected.',
         duration_ms: Date.now() - analysisStartedAt,
@@ -1210,13 +1086,43 @@ Deno.serve(async (request: Request) => {
       return jsonResponse(
         {
           error: NO_CREDITS_MESSAGE,
-          remainingCredits: consumption.remaining_credits,
+          remainingCredits: 0,
         },
         { status: 402 },
       );
     }
 
-    const remainingCredits = consumption.remaining_credits;
+    const {
+      data: updatedCreditRow,
+      error: updatedCreditError,
+    } = await adminClient
+      .from('user_credit_balances')
+      .select('remaining_credits')
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (updatedCreditError) {
+      logAnalysisAudit('failed', {
+        stage: 'credit_readback',
+        user_id: auditUserId,
+        request_id: auditRequestId,
+        input_hash: auditInputHash,
+        input_characters: auditInputCharacters,
+        selected_keyword_count: auditSelectedKeywordCount,
+        status_code: 500,
+        error_message: updatedCreditError.message,
+        duration_ms: Date.now() - analysisStartedAt,
+      });
+
+      return jsonResponse(
+        { error: updatedCreditError.message },
+        { status: 500 },
+      );
+    }
+
+    const remainingCredits = Number(
+      updatedCreditRow?.remaining_credits ?? 0,
+    );
 
     logAnalysisAudit('succeeded', {
       stage: 'completed',
@@ -1229,13 +1135,13 @@ Deno.serve(async (request: Request) => {
       remaining_credits: Number.isFinite(remainingCredits)
         ? remainingCredits
         : 0,
-      replayed: consumption.replayed,
       status_code: 200,
       duration_ms: Date.now() - analysisStartedAt,
     });
 
     return jsonResponse({
-      ...preparedResponse,
+      ...result,
+      requestId,
       remainingCredits: Number.isFinite(remainingCredits)
         ? remainingCredits
         : 0,

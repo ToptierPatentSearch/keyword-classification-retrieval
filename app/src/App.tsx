@@ -26,13 +26,20 @@ function ClassificationEvidenceCell({
   evidence,
   candidates,
 }: ClassificationEvidenceCellProps) {
-  const evidenceItems: ClassificationCodeEvidence[] =
+  const fTermIsAiOnly = system === 'F-term';
+  const evidenceItems: ClassificationCodeEvidence[] = (
     evidence && evidence.length > 0
       ? evidence
       : codes.map((code) => ({
         code,
         status: 'ai_suggested' as const,
-      }));
+      }))
+  )
+    .map((item) =>
+      fTermIsAiOnly
+        ? { ...item, status: 'ai_suggested' as const }
+        : item,
+    );
 
   const suggestedCodeKeys = new Set(
     evidenceItems.map((item) =>
@@ -40,7 +47,7 @@ function ClassificationEvidenceCell({
     ),
   );
 
-  const additionalCandidates = (candidates ?? [])
+  const additionalCandidates = (fTermIsAiOnly ? [] : (candidates ?? []))
     .filter(
       (candidate) =>
         !suggestedCodeKeys.has(
@@ -52,7 +59,9 @@ function ClassificationEvidenceCell({
   if (evidenceItems.length === 0 && additionalCandidates.length === 0) {
     return (
       <span style={{ color: '#64748b', fontSize: '0.8rem' }}>
-        {system === 'FI'
+        {fTermIsAiOnly
+          ? 'No AI-suggested F-term.'
+          : system === 'FI'
           ? 'No FI candidate found in the currently imported FI coverage.'
           : '—'}
       </span>
@@ -62,7 +71,8 @@ function ClassificationEvidenceCell({
   return (
     <div style={{ display: 'grid', gap: '0.7rem', minWidth: '13rem' }}>
       {evidenceItems.map((item, index) => {
-        const databaseVerified = item.status === 'database_verified';
+        const databaseVerified =
+          !fTermIsAiOnly && item.status === 'database_verified';
         const title = item.title_en || item.title_ja;
 
         return (
@@ -91,10 +101,14 @@ function ClassificationEvidenceCell({
                   color: databaseVerified ? '#166534' : '#1e40af',
                   fontSize: '0.72rem',
                   fontWeight: 800,
-                  whiteSpace: 'nowrap',
+                  whiteSpace: fTermIsAiOnly ? 'normal' : 'nowrap',
                 }}
               >
-                {databaseVerified ? 'Database verified' : 'AI suggested'}
+                {databaseVerified
+                  ? 'Database verified'
+                  : fTermIsAiOnly
+                    ? 'AI suggested · not database verified'
+                    : 'AI suggested'}
               </span>
             </div>
 
@@ -935,7 +949,7 @@ export default function App() {
             </div>
           )}
           <p className="muted">
-            Extract normalized technical terms, rank frequencies, and map likely IPC, CPC, FI, and F-term codes using a Supabase Edge Function.
+            Extract normalized technical terms, rank frequencies, and map likely IPC, CPC, and FI codes plus AI-suggested F-term codes using a Supabase Edge Function.
           </p>
         </div>
         <div className="user-panel">
@@ -991,7 +1005,9 @@ export default function App() {
                 IPC, CPC, and FI suggestions are marked <strong>Database verified</strong>{' '}
                 only when the code exists in the imported classification database.
                 Additional title-matched entries are displayed as <strong>Database candidates</strong>.
-                Unmatched codes and all F-term codes remain <strong>AI suggested</strong>.
+                Unmatched codes remain <strong>AI suggested</strong>. F-term codes are{' '}
+                <strong>AI suggested only</strong>, are never marked database verified by this app,
+                and should be independently confirmed in J-PlatPat before use.
               </p>
 
             </div>
@@ -1011,7 +1027,7 @@ export default function App() {
                   <th>IPC</th>
                   <th>CPC</th>
                   <th>FI</th>
-                  <th>F-term</th>
+                  <th>F-term (AI suggested only)</th>
                   <th>Confidence</th>
                   <th>Reason</th>
                 </tr>

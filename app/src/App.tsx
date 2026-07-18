@@ -196,6 +196,86 @@ function asErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : 'An unexpected error occurred.';
 }
 
+const PENDING_ANALYSIS_REQUEST_KEY = 'kcr_pending_analysis_request_v2';
+
+type PendingAnalysisRequest = {
+  userId: string;
+  requestId: string;
+  inputFingerprint: string;
+};
+
+async function createAnalysisInputFingerprint(
+  input: string,
+  selectedKeywords: string[],
+): Promise<string> {
+  const encodedInput = new TextEncoder().encode(
+    JSON.stringify({
+      text: input,
+      selected_keywords: selectedKeywords,
+    }),
+  );
+  const digest = await crypto.subtle.digest('SHA-256', encodedInput);
+
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+function readPendingAnalysisRequest(): PendingAnalysisRequest | null {
+  try {
+    const storedValue = window.localStorage.getItem(
+      PENDING_ANALYSIS_REQUEST_KEY,
+    );
+
+    if (!storedValue) {
+      return null;
+    }
+
+    const parsed = JSON.parse(storedValue) as Partial<PendingAnalysisRequest>;
+    const validRequestId =
+      typeof parsed.requestId === 'string' &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+        parsed.requestId,
+      );
+    const validFingerprint =
+      typeof parsed.inputFingerprint === 'string' &&
+      /^[0-9a-f]{64}$/i.test(parsed.inputFingerprint);
+
+    if (
+      typeof parsed.userId !== 'string' ||
+      !parsed.userId ||
+      !validRequestId ||
+      !validFingerprint
+    ) {
+      window.localStorage.removeItem(PENDING_ANALYSIS_REQUEST_KEY);
+      return null;
+    }
+
+    return parsed as PendingAnalysisRequest;
+  } catch {
+    return null;
+  }
+}
+
+function storePendingAnalysisRequest(request: PendingAnalysisRequest): void {
+  try {
+    window.localStorage.setItem(
+      PENDING_ANALYSIS_REQUEST_KEY,
+      JSON.stringify(request),
+    );
+  } catch {
+    // The in-memory fallback still protects retries during this page session.
+  }
+}
+
+function clearPendingAnalysisRequest(): void {
+  try {
+    window.localStorage.removeItem(PENDING_ANALYSIS_REQUEST_KEY);
+  } catch {
+    // Storage can be unavailable in restrictive browser modes.
+  }
+}
+
 function formatEstimatedDuration(totalSeconds: number): string {
   if (totalSeconds < 60) {
     return `${totalSeconds} seconds`;
@@ -435,10 +515,7 @@ export default function App() {
   const [, setSelectedPlan] = useState<PlanId | null>(null);
   const [creditsExpireAt, setCreditsExpireAt] = useState<string | null>(null);
   const analyzeInFlightRef = useRef(false);
-  const pendingAnalyzeRequestRef = useRef<{
-    requestId: string;
-    input: string;
-  } | null>(null);
+  const pendingAnalyzeRequestRef = useRef<PendingAnalysisRequest | null>(null);
   function handleAcceptTerms() {
     window.localStorage.setItem(TERMS_ACCEPTED_KEY, 'true');
     setTermsAccepted(true);
@@ -637,17 +714,6 @@ export default function App() {
     setRemainingCreditsAfterAnalysis(null);
 
     try {
-      const pendingRequest = pendingAnalyzeRequestRef.current;
-      const requestId =
-        pendingRequest?.input === trimmedText
-          ? pendingRequest.requestId
-          : crypto.randomUUID();
-
-      pendingAnalyzeRequestRef.current = {
-        requestId,
-        input: trimmedText,
-      };
-
       const {
         data: { session: activeSession },
         error: sessionError,
@@ -663,6 +729,28 @@ export default function App() {
         throw new Error('Your signed-in session is no longer valid. Please sign in again.');
       }
 
+      const selectedKeywords: string[] = [];
+      const inputFingerprint = await createAnalysisInputFingerprint(
+        trimmedText,
+        selectedKeywords,
+      );
+      const inMemoryRequest = pendingAnalyzeRequestRef.current;
+      const storedRequest = readPendingAnalysisRequest();
+      const reusableRequest = [inMemoryRequest, storedRequest].find(
+        (candidate) =>
+          candidate?.userId === activeSession.user.id &&
+          candidate.inputFingerprint === inputFingerprint,
+      );
+      const requestId = reusableRequest?.requestId ?? crypto.randomUUID();
+      const pendingRequest: PendingAnalysisRequest = {
+        userId: activeSession.user.id,
+        requestId,
+        inputFingerprint,
+      };
+
+      pendingAnalyzeRequestRef.current = pendingRequest;
+      storePendingAnalysisRequest(pendingRequest);
+
       const { data, error: functionError } =
         await supabase.functions.invoke<
           AnalysisResult & {
@@ -676,7 +764,7 @@ export default function App() {
           body: {
             input: trimmedText,
             request_id: requestId,
-            selected_keywords: [],
+            selected_keywords: selectedKeywords,
           },
         });
 
@@ -701,6 +789,7 @@ export default function App() {
 
         if (response?.status === 402) {
           pendingAnalyzeRequestRef.current = null;
+          clearPendingAnalysisRequest();
           setError('');
           setResult(null);
           setRemainingCreditsAfterAnalysis(0);
@@ -731,6 +820,7 @@ export default function App() {
 
       setResult(data);
       pendingAnalyzeRequestRef.current = null;
+      clearPendingAnalysisRequest();
       setRemainingCreditsAfterAnalysis(data.remainingCredits);
       setRemainingCredits(data.remainingCredits);
 
@@ -747,6 +837,7 @@ export default function App() {
   }
   function handleClear() {
     pendingAnalyzeRequestRef.current = null;
+    clearPendingAnalysisRequest();
     setText('');
     setResult(null);
     setError('');
@@ -773,6 +864,7 @@ export default function App() {
   async function handleSignOut() {
     await supabase.auth.signOut();
     pendingAnalyzeRequestRef.current = null;
+    clearPendingAnalysisRequest();
     setResult(null);
     setRemainingCredits(null);
     setSelectedPlan(null);

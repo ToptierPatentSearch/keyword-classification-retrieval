@@ -146,6 +146,47 @@ function jsonResponse(body: unknown, init: ResponseInit = {}) {
   });
 }
 
+type AnalysisAuditOutcome = 'started' | 'succeeded' | 'failed' | 'rejected';
+
+interface AnalysisAuditDetails {
+  stage: string;
+  user_id?: string;
+  request_id?: string;
+  input_hash?: string;
+  input_characters?: number;
+  selected_keyword_count?: number;
+  result_keyword_count?: number;
+  remaining_credits?: number;
+  status_code?: number;
+  error_name?: string;
+  error_message?: string;
+  duration_ms?: number;
+}
+
+function logAnalysisAudit(
+  outcome: AnalysisAuditOutcome,
+  details: AnalysisAuditDetails,
+): void {
+  const entry = JSON.stringify({
+    event: 'analysis_audit',
+    outcome,
+    occurred_at: new Date().toISOString(),
+    ...details,
+  });
+
+  if (outcome === 'failed') {
+    console.error(entry);
+    return;
+  }
+
+  if (outcome === 'rejected') {
+    console.warn(entry);
+    return;
+  }
+
+  console.info(entry);
+}
+
 function getRequiredEnv(name: string): string {
   const value = Deno.env.get(name);
 
@@ -830,6 +871,14 @@ Deno.serve(async (request: Request) => {
     );
   }
 
+  const analysisStartedAt = Date.now();
+  let auditStage = 'configuration';
+  let auditUserId: string | undefined;
+  let auditRequestId: string | undefined;
+  let auditInputHash: string | undefined;
+  let auditInputCharacters: number | undefined;
+  let auditSelectedKeywordCount: number | undefined;
+
   try {
     const apiKey = getRequiredEnv('OPENAI_API_KEY');
     const supabaseUrl = getRequiredEnv('SUPABASE_URL');
@@ -841,6 +890,13 @@ Deno.serve(async (request: Request) => {
     const authHeader = request.headers.get('Authorization');
 
     if (!authHeader) {
+      logAnalysisAudit('rejected', {
+        stage: 'authentication',
+        status_code: 401,
+        error_message: 'Authorization header was not provided.',
+        duration_ms: Date.now() - analysisStartedAt,
+      });
+
       return jsonResponse(
         { error: 'Authentication required.' },
         { status: 401 },
@@ -865,11 +921,21 @@ Deno.serve(async (request: Request) => {
     } = await authClient.auth.getUser();
 
     if (userError || !user) {
+      logAnalysisAudit('rejected', {
+        stage: 'authentication',
+        status_code: 401,
+        error_message: userError?.message ?? 'Authenticated user was not found.',
+        duration_ms: Date.now() - analysisStartedAt,
+      });
+
       return jsonResponse(
         { error: 'Authentication required.' },
         { status: 401 },
       );
     }
+
+    auditUserId = user.id;
+    auditStage = 'credit_check';
 
     const adminClient = createClient(
       supabaseUrl,
@@ -889,12 +955,29 @@ Deno.serve(async (request: Request) => {
       .maybeSingle();
 
     if (creditError) {
+      logAnalysisAudit('failed', {
+        stage: auditStage,
+        user_id: auditUserId,
+        status_code: 500,
+        error_message: creditError.message,
+        duration_ms: Date.now() - analysisStartedAt,
+      });
+
       return jsonResponse({ error: creditError.message }, { status: 500 });
     }
 
     const currentCredits = Number(creditRow?.remaining_credits ?? 0);
 
     if (!Number.isFinite(currentCredits) || currentCredits <= 0) {
+      logAnalysisAudit('rejected', {
+        stage: auditStage,
+        user_id: auditUserId,
+        remaining_credits: 0,
+        status_code: 402,
+        error_message: 'No analysis credits are available.',
+        duration_ms: Date.now() - analysisStartedAt,
+      });
+
       return jsonResponse(
         {
           error: NO_CREDITS_MESSAGE,
@@ -904,6 +987,7 @@ Deno.serve(async (request: Request) => {
       );
     }
 
+    auditStage = 'request_validation';
     const body = (await request.json()) as AnalyzeRequest;
     const text = validateText(body);
     const requestId = validateRequestId(body.request_id);
@@ -916,6 +1000,22 @@ Deno.serve(async (request: Request) => {
         selected_keywords: selectedKeywords,
       }),
     );
+
+    auditRequestId = requestId;
+    auditInputHash = inputHash;
+    auditInputCharacters = text.length;
+    auditSelectedKeywordCount = selectedKeywords.length;
+
+    logAnalysisAudit('started', {
+      stage: 'request_accepted',
+      user_id: auditUserId,
+      request_id: auditRequestId,
+      input_hash: auditInputHash,
+      input_characters: auditInputCharacters,
+      selected_keyword_count: auditSelectedKeywordCount,
+    });
+
+    auditStage = 'openai_analysis';
     const aiResult = await analyzePatentText(
       text,
       apiKey,
@@ -924,6 +1024,7 @@ Deno.serve(async (request: Request) => {
     let result: AnalysisResult;
 
     try {
+      auditStage = 'classification_enrichment';
       result = await enrichAnalysisClassifications(
         adminClient,
         aiResult,
@@ -940,6 +1041,7 @@ Deno.serve(async (request: Request) => {
       );
     }
 
+    auditStage = 'credit_consumption';
     const { data: consumed, error: consumeError } =
       await adminClient.rpc(
         'consume_analysis_credit_once',
@@ -952,10 +1054,35 @@ Deno.serve(async (request: Request) => {
       );
 
     if (consumeError) {
+      logAnalysisAudit('failed', {
+        stage: auditStage,
+        user_id: auditUserId,
+        request_id: auditRequestId,
+        input_hash: auditInputHash,
+        input_characters: auditInputCharacters,
+        selected_keyword_count: auditSelectedKeywordCount,
+        status_code: 500,
+        error_message: consumeError.message,
+        duration_ms: Date.now() - analysisStartedAt,
+      });
+
       return jsonResponse({ error: consumeError.message }, { status: 500 });
     }
 
     if (!consumed) {
+      logAnalysisAudit('rejected', {
+        stage: auditStage,
+        user_id: auditUserId,
+        request_id: auditRequestId,
+        input_hash: auditInputHash,
+        input_characters: auditInputCharacters,
+        selected_keyword_count: auditSelectedKeywordCount,
+        remaining_credits: 0,
+        status_code: 402,
+        error_message: 'Credit consumption was rejected.',
+        duration_ms: Date.now() - analysisStartedAt,
+      });
+
       return jsonResponse(
         {
           error: NO_CREDITS_MESSAGE,
@@ -975,6 +1102,18 @@ Deno.serve(async (request: Request) => {
       .maybeSingle();
 
     if (updatedCreditError) {
+      logAnalysisAudit('failed', {
+        stage: 'credit_readback',
+        user_id: auditUserId,
+        request_id: auditRequestId,
+        input_hash: auditInputHash,
+        input_characters: auditInputCharacters,
+        selected_keyword_count: auditSelectedKeywordCount,
+        status_code: 500,
+        error_message: updatedCreditError.message,
+        duration_ms: Date.now() - analysisStartedAt,
+      });
+
       return jsonResponse(
         { error: updatedCreditError.message },
         { status: 500 },
@@ -984,6 +1123,21 @@ Deno.serve(async (request: Request) => {
     const remainingCredits = Number(
       updatedCreditRow?.remaining_credits ?? 0,
     );
+
+    logAnalysisAudit('succeeded', {
+      stage: 'completed',
+      user_id: auditUserId,
+      request_id: auditRequestId,
+      input_hash: auditInputHash,
+      input_characters: auditInputCharacters,
+      selected_keyword_count: auditSelectedKeywordCount,
+      result_keyword_count: result.keywords.length,
+      remaining_credits: Number.isFinite(remainingCredits)
+        ? remainingCredits
+        : 0,
+      status_code: 200,
+      duration_ms: Date.now() - analysisStartedAt,
+    });
 
     return jsonResponse({
       ...result,
@@ -1005,6 +1159,19 @@ Deno.serve(async (request: Request) => {
         : message.includes('too long')
           ? 413
           : 500;
+
+    logAnalysisAudit('failed', {
+      stage: auditStage,
+      user_id: auditUserId,
+      request_id: auditRequestId,
+      input_hash: auditInputHash,
+      input_characters: auditInputCharacters,
+      selected_keyword_count: auditSelectedKeywordCount,
+      status_code: status,
+      error_name: error instanceof Error ? error.name : 'UnknownError',
+      error_message: message,
+      duration_ms: Date.now() - analysisStartedAt,
+    });
 
     return jsonResponse({ error: message }, { status });
   }

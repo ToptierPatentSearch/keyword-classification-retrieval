@@ -435,6 +435,10 @@ export default function App() {
   const [, setSelectedPlan] = useState<PlanId | null>(null);
   const [creditsExpireAt, setCreditsExpireAt] = useState<string | null>(null);
   const analyzeInFlightRef = useRef(false);
+  const pendingAnalyzeRequestRef = useRef<{
+    requestId: string;
+    input: string;
+  } | null>(null);
   function handleAcceptTerms() {
     window.localStorage.setItem(TERMS_ACCEPTED_KEY, 'true');
     setTermsAccepted(true);
@@ -633,7 +637,31 @@ export default function App() {
     setRemainingCreditsAfterAnalysis(null);
 
     try {
-      const requestId = crypto.randomUUID();
+      const pendingRequest = pendingAnalyzeRequestRef.current;
+      const requestId =
+        pendingRequest?.input === trimmedText
+          ? pendingRequest.requestId
+          : crypto.randomUUID();
+
+      pendingAnalyzeRequestRef.current = {
+        requestId,
+        input: trimmedText,
+      };
+
+      const {
+        data: { session: activeSession },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+
+      if (sessionError) {
+        throw new Error(`Unable to retrieve the signed-in session: ${sessionError.message}`);
+      }
+
+      const accessToken = activeSession?.access_token;
+
+      if (!activeSession || !accessToken || activeSession.user.id !== session.user.id) {
+        throw new Error('Your signed-in session is no longer valid. Please sign in again.');
+      }
 
       const { data, error: functionError } =
         await supabase.functions.invoke<
@@ -642,6 +670,9 @@ export default function App() {
             remainingCredits: number;
           }
         >('analyze', {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
           body: {
             input: trimmedText,
             request_id: requestId,
@@ -669,6 +700,7 @@ export default function App() {
         }
 
         if (response?.status === 402) {
+          pendingAnalyzeRequestRef.current = null;
           setError('');
           setResult(null);
           setRemainingCreditsAfterAnalysis(0);
@@ -698,6 +730,7 @@ export default function App() {
       }
 
       setResult(data);
+      pendingAnalyzeRequestRef.current = null;
       setRemainingCreditsAfterAnalysis(data.remainingCredits);
       setRemainingCredits(data.remainingCredits);
 
@@ -713,6 +746,7 @@ export default function App() {
     }
   }
   function handleClear() {
+    pendingAnalyzeRequestRef.current = null;
     setText('');
     setResult(null);
     setError('');
@@ -738,6 +772,7 @@ export default function App() {
 
   async function handleSignOut() {
     await supabase.auth.signOut();
+    pendingAnalyzeRequestRef.current = null;
     setResult(null);
     setRemainingCredits(null);
     setSelectedPlan(null);

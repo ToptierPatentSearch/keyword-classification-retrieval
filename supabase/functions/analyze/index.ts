@@ -67,6 +67,12 @@ interface AnalysisResult {
   remainingCredits?: number;
 }
 
+interface CreditConsumptionResult {
+  consumed: boolean;
+  remaining_credits: number;
+  replayed: boolean;
+}
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers':
@@ -157,6 +163,7 @@ interface AnalysisAuditDetails {
   selected_keyword_count?: number;
   result_keyword_count?: number;
   remaining_credits?: number;
+  replayed?: boolean;
   status_code?: number;
   error_name?: string;
   error_message?: string;
@@ -241,6 +248,40 @@ function validateSelectedKeywords(value: unknown): string[] {
   });
 
   return Array.from(new Set(keywords)).slice(0, 100);
+}
+
+function parseCreditConsumptionResult(
+  value: unknown,
+): CreditConsumptionResult {
+  const row = Array.isArray(value) ? value[0] : value;
+
+  if (!row || typeof row !== 'object') {
+    throw new HttpError(
+      503,
+      'Credit finalization is temporarily unavailable. Retry the same request; idempotency prevents a duplicate charge.',
+    );
+  }
+
+  const record = row as Record<string, unknown>;
+  const remainingCredits = Number(record.remaining_credits);
+
+  if (
+    typeof record.consumed !== 'boolean' ||
+    typeof record.replayed !== 'boolean' ||
+    !Number.isInteger(remainingCredits) ||
+    remainingCredits < 0
+  ) {
+    throw new HttpError(
+      503,
+      'Credit finalization returned an invalid response. Retry the same request; idempotency prevents a duplicate charge.',
+    );
+  }
+
+  return {
+    consumed: record.consumed,
+    remaining_credits: remainingCredits,
+    replayed: record.replayed,
+  };
 }
 
 async function sha256Hex(value: string): Promise<string> {
@@ -955,15 +996,12 @@ Deno.serve(async (request: Request) => {
       .maybeSingle();
 
     if (creditError) {
-      logAnalysisAudit('failed', {
-        stage: auditStage,
-        user_id: auditUserId,
-        status_code: 500,
-        error_message: creditError.message,
-        duration_ms: Date.now() - analysisStartedAt,
-      });
+      console.error('Credit availability check failed:', creditError);
 
-      return jsonResponse({ error: creditError.message }, { status: 500 });
+      throw new HttpError(
+        503,
+        'Credit database is temporarily unavailable. No credit was consumed.',
+      );
     }
 
     const currentCredits = Number(creditRow?.remaining_credits ?? 0);
@@ -1042,9 +1080,9 @@ Deno.serve(async (request: Request) => {
     }
 
     auditStage = 'credit_consumption';
-    const { data: consumed, error: consumeError } =
+    const { data: consumptionData, error: consumeError } =
       await adminClient.rpc(
-        'consume_analysis_credit_once',
+        'consume_analysis_credit_once_v2',
         {
           p_user_id: user.id,
           p_source: 'analysis',
@@ -1054,22 +1092,28 @@ Deno.serve(async (request: Request) => {
       );
 
     if (consumeError) {
-      logAnalysisAudit('failed', {
-        stage: auditStage,
-        user_id: auditUserId,
-        request_id: auditRequestId,
-        input_hash: auditInputHash,
-        input_characters: auditInputCharacters,
-        selected_keyword_count: auditSelectedKeywordCount,
-        status_code: 500,
-        error_message: consumeError.message,
-        duration_ms: Date.now() - analysisStartedAt,
-      });
+      console.error('Atomic credit finalization failed:', consumeError);
 
-      return jsonResponse({ error: consumeError.message }, { status: 500 });
+      if (
+        consumeError.message.includes(
+          'request_id was previously used with different input',
+        )
+      ) {
+        throw new HttpError(
+          409,
+          'request_id was previously used with different input.',
+        );
+      }
+
+      throw new HttpError(
+        503,
+        'Credit finalization is temporarily unavailable. Retry the same request; idempotency prevents a duplicate charge.',
+      );
     }
 
-    if (!consumed) {
+    const consumption = parseCreditConsumptionResult(consumptionData);
+
+    if (!consumption.consumed) {
       logAnalysisAudit('rejected', {
         stage: auditStage,
         user_id: auditUserId,
@@ -1077,7 +1121,7 @@ Deno.serve(async (request: Request) => {
         input_hash: auditInputHash,
         input_characters: auditInputCharacters,
         selected_keyword_count: auditSelectedKeywordCount,
-        remaining_credits: 0,
+        remaining_credits: consumption.remaining_credits,
         status_code: 402,
         error_message: 'Credit consumption was rejected.',
         duration_ms: Date.now() - analysisStartedAt,
@@ -1086,43 +1130,13 @@ Deno.serve(async (request: Request) => {
       return jsonResponse(
         {
           error: NO_CREDITS_MESSAGE,
-          remainingCredits: 0,
+          remainingCredits: consumption.remaining_credits,
         },
         { status: 402 },
       );
     }
 
-    const {
-      data: updatedCreditRow,
-      error: updatedCreditError,
-    } = await adminClient
-      .from('user_credit_balances')
-      .select('remaining_credits')
-      .eq('user_id', user.id)
-      .maybeSingle();
-
-    if (updatedCreditError) {
-      logAnalysisAudit('failed', {
-        stage: 'credit_readback',
-        user_id: auditUserId,
-        request_id: auditRequestId,
-        input_hash: auditInputHash,
-        input_characters: auditInputCharacters,
-        selected_keyword_count: auditSelectedKeywordCount,
-        status_code: 500,
-        error_message: updatedCreditError.message,
-        duration_ms: Date.now() - analysisStartedAt,
-      });
-
-      return jsonResponse(
-        { error: updatedCreditError.message },
-        { status: 500 },
-      );
-    }
-
-    const remainingCredits = Number(
-      updatedCreditRow?.remaining_credits ?? 0,
-    );
+    const remainingCredits = consumption.remaining_credits;
 
     logAnalysisAudit('succeeded', {
       stage: 'completed',
@@ -1135,6 +1149,7 @@ Deno.serve(async (request: Request) => {
       remaining_credits: Number.isFinite(remainingCredits)
         ? remainingCredits
         : 0,
+      replayed: consumption.replayed,
       status_code: 200,
       duration_ms: Date.now() - analysisStartedAt,
     });

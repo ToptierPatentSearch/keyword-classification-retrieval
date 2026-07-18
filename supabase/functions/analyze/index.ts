@@ -152,7 +152,12 @@ function jsonResponse(body: unknown, init: ResponseInit = {}) {
   });
 }
 
-type AnalysisAuditOutcome = 'started' | 'succeeded' | 'failed' | 'rejected';
+type AnalysisAuditOutcome =
+  | 'started'
+  | 'ready'
+  | 'succeeded'
+  | 'failed'
+  | 'rejected';
 
 interface AnalysisAuditDetails {
   stage: string;
@@ -438,6 +443,60 @@ function normalizeResult(
     keywords: normalizedKeywords,
     ...(warning ? { warning } : {}),
   };
+}
+
+function validateAnalysisReadyForCharge(result: AnalysisResult): void {
+  const validLanguage = result.language === 'en' || result.language === 'ja';
+  const validKeywordCount =
+    Array.isArray(result.keywords) &&
+    result.keywords.length > 0 &&
+    result.keywords.length <= 40;
+
+  const validKeywords =
+    validKeywordCount &&
+    result.keywords.every((keyword) =>
+      Boolean(keyword.term.trim()) &&
+      Boolean(keyword.normalized_term.trim()) &&
+      Number.isInteger(keyword.count) &&
+      keyword.count > 0 &&
+      Number.isInteger(keyword.rank) &&
+      keyword.rank > 0 &&
+      Array.isArray(keyword.ipc) &&
+      Array.isArray(keyword.cpc) &&
+      Array.isArray(keyword.fi) &&
+      Array.isArray(keyword.f_term) &&
+      Array.isArray(keyword.ipc_evidence) &&
+      Array.isArray(keyword.cpc_evidence) &&
+      Array.isArray(keyword.fi_evidence) &&
+      Array.isArray(keyword.f_term_evidence) &&
+      Array.isArray(keyword.ipc_candidates) &&
+      Array.isArray(keyword.cpc_candidates) &&
+      Array.isArray(keyword.fi_candidates) &&
+      (
+        keyword.classification_confidence === 'high' ||
+        keyword.classification_confidence === 'medium' ||
+        keyword.classification_confidence === 'low'
+      ) &&
+      Boolean(keyword.reason.trim())
+    );
+
+  if (!validLanguage || !validKeywords) {
+    throw new HttpError(
+      502,
+      'Analysis did not produce a complete valid result. No credit was consumed.',
+    );
+  }
+
+  try {
+    JSON.stringify(result);
+  } catch (serializationError) {
+    console.error('Analysis response serialization check failed:', serializationError);
+
+    throw new HttpError(
+      502,
+      'Analysis result could not be prepared for delivery. No credit was consumed.',
+    );
+  }
 }
 
 function appendWarning(
@@ -1079,6 +1138,27 @@ Deno.serve(async (request: Request) => {
       );
     }
 
+    auditStage = 'pre_charge_validation';
+    validateAnalysisReadyForCharge(result);
+
+    const preparedResponse = {
+      ...result,
+      requestId,
+    };
+
+    JSON.stringify(preparedResponse);
+
+    logAnalysisAudit('ready', {
+      stage: 'ready_for_charge',
+      user_id: auditUserId,
+      request_id: auditRequestId,
+      input_hash: auditInputHash,
+      input_characters: auditInputCharacters,
+      selected_keyword_count: auditSelectedKeywordCount,
+      result_keyword_count: result.keywords.length,
+      duration_ms: Date.now() - analysisStartedAt,
+    });
+
     auditStage = 'credit_consumption';
     const { data: consumptionData, error: consumeError } =
       await adminClient.rpc(
@@ -1155,8 +1235,7 @@ Deno.serve(async (request: Request) => {
     });
 
     return jsonResponse({
-      ...result,
-      requestId,
+      ...preparedResponse,
       remainingCredits: Number.isFinite(remainingCredits)
         ? remainingCredits
         : 0,

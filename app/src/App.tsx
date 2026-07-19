@@ -1,7 +1,7 @@
 import Footer from "./components/Footer";
 import termsOfUseText from "./components/terms-of-use.txt?raw";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
-import AdminUserActivity from "./components/AdminUserActivity";
+import UserActivityPage from "./pages/admin/UserActivityPage";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./supabaseClient";
 import type {
@@ -831,6 +831,14 @@ export default function App() {
   const [remainingCredits, setRemainingCredits] = useState<number | null>(null);
   const [, setSelectedPlan] = useState<PlanId | null>(null);
   const [creditsExpireAt, setCreditsExpireAt] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [currentRoute, setCurrentRoute] = useState<
+    "analysis" | "admin-user-activity"
+  >(() =>
+    window.location.hash === "#/admin/user-activity"
+      ? "admin-user-activity"
+      : "analysis",
+  );
   const analyzeInFlightRef = useRef(false);
   const pendingAnalyzeRequestRef = useRef<PendingAnalysisRequest | null>(null);
   function handleAcceptTerms() {
@@ -853,6 +861,44 @@ export default function App() {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    function updateRoute() {
+      setCurrentRoute(
+        window.location.hash === "#/admin/user-activity"
+          ? "admin-user-activity"
+          : "analysis",
+      );
+    }
+
+    window.addEventListener("hashchange", updateRoute);
+    return () => window.removeEventListener("hashchange", updateRoute);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkAdminAccess() {
+      if (!session) {
+        setIsAdmin(false);
+        return;
+      }
+
+      const { error: adminAccessError } = await supabase
+        .rpc("get_admin_user_activity")
+        .limit(1);
+
+      if (!cancelled) {
+        setIsAdmin(!adminAccessError);
+      }
+    }
+
+    void checkAdminAccess();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.user.id]);
   useEffect(() => {
     if (!session) {
       return;
@@ -1270,6 +1316,21 @@ export default function App() {
     );
   }
 
+  if (currentRoute === "admin-user-activity") {
+    return (
+      <UserActivityPage
+        administratorEmail={session.user.email}
+        onBack={() => {
+          window.location.hash = "";
+        }}
+        onSignOut={async () => {
+          window.location.hash = "";
+          await handleSignOut();
+        }}
+      />
+    );
+  }
+
   return (
     <main className="shell">
       <header className="hero">
@@ -1297,9 +1358,26 @@ export default function App() {
         </div>
         <div className="user-panel">
           <span>{session.user.email}</span>
-          <button type="button" className="secondary" onClick={handleSignOut}>
-            Sign out
-          </button>
+          <div className="user-panel-actions">
+            {isAdmin && (
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => {
+                  window.location.hash = "#/admin/user-activity";
+                }}
+              >
+                Admin
+              </button>
+            )}
+            <button
+              type="button"
+              className="secondary"
+              onClick={handleSignOut}
+            >
+              Sign out
+            </button>
+          </div>
         </div>
       </header>
       {showPurchaseCards && (
@@ -1425,8 +1503,6 @@ export default function App() {
           </div>
         </section>
       )}
-      <AdminUserActivity />
-
       <Footer />
     </main>
   );

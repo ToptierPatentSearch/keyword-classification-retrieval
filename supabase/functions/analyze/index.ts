@@ -8,7 +8,7 @@ type Confidence = "high" | "medium" | "low";
 type PatentLanguage = "en" | "ja";
 type ClassificationSystem = "IPC" | "CPC" | "FI" | "F-term";
 type CatalogClassificationSystem = Exclude<ClassificationSystem, "F-term">;
-type ClassificationVerificationStatus = "database_verified" | "ai_suggested";
+type ClassificationVerificationStatus = "database_verified";
 
 interface AnalyzeRequest {
   text?: unknown;
@@ -237,10 +237,10 @@ const responseSchema = {
           },
           count: { type: "integer", minimum: 1 },
           rank: { type: "integer", minimum: 1 },
-          ipc: { type: "array", items: { type: "string" } },
-          cpc: { type: "array", items: { type: "string" } },
-          fi: { type: "array", items: { type: "string" } },
-          f_term: { type: "array", items: { type: "string" } },
+          ipc: { type: "array", maxItems: 0, items: { type: "string" } },
+          cpc: { type: "array", maxItems: 0, items: { type: "string" } },
+          fi: { type: "array", maxItems: 0, items: { type: "string" } },
+          f_term: { type: "array", maxItems: 0, items: { type: "string" } },
           classification_confidence: {
             type: "string",
             enum: ["high", "medium", "low"],
@@ -626,10 +626,6 @@ function normalizeResult(
           ? keyword.classification_confidence
           : "low";
 
-      const ipc = uniqueCodes(keyword.ipc);
-      const cpc = uniqueCodes(keyword.cpc);
-      const fi = uniqueCodes(keyword.fi);
-      const fTerm = uniqueCodes(keyword.f_term);
       const normalizedTerm = String(keyword.normalized_term ?? "").trim();
       const term = String(keyword.term ?? "").trim();
 
@@ -642,10 +638,11 @@ function normalizeResult(
         ),
         count: Math.max(1, Math.trunc(Number(keyword.count) || 1)),
         rank: Math.max(1, Math.trunc(Number(keyword.rank) || 1)),
-        ipc: confidence === "low" ? ipc.slice(0, 2) : ipc,
-        cpc: confidence === "low" ? cpc.slice(0, 2) : cpc,
-        fi: confidence === "low" ? fi.slice(0, 1) : fi,
-        f_term: confidence === "low" ? fTerm.slice(0, 1) : fTerm,
+        // Classification codes are never accepted from model output.
+        ipc: [],
+        cpc: [],
+        fi: [],
+        f_term: [],
         classification_confidence: confidence,
         reason: String(keyword.reason ?? "").trim(),
       };
@@ -659,6 +656,28 @@ function normalizeResult(
     keywords: normalizedKeywords,
     ...(warning ? { warning } : {}),
   };
+}
+
+function verifiedEvidenceMatchesCodes(
+  codes: string[],
+  evidence: ClassificationCodeEvidence[] | undefined,
+): boolean {
+  if (!Array.isArray(evidence)) return false;
+
+  const normalizedCodes = uniqueCodes(codes)
+    .map(normalizeClassificationCode)
+    .sort();
+  const normalizedEvidenceCodes = uniqueCodes(evidence.map((item) => item.code))
+    .map(normalizeClassificationCode)
+    .sort();
+
+  return (
+    evidence.every((item) => item.status === "database_verified") &&
+    normalizedCodes.length === normalizedEvidenceCodes.length &&
+    normalizedCodes.every(
+      (code, index) => code === normalizedEvidenceCodes[index],
+    )
+  );
 }
 
 function validateAnalysisReadyForCharge(result: AnalysisResult): void {
@@ -690,6 +709,9 @@ function validateAnalysisReadyForCharge(result: AnalysisResult): void {
         Array.isArray(keyword.cpc_evidence) &&
         Array.isArray(keyword.fi_evidence) &&
         Array.isArray(keyword.f_term_evidence) &&
+        verifiedEvidenceMatchesCodes(keyword.ipc, keyword.ipc_evidence) &&
+        verifiedEvidenceMatchesCodes(keyword.cpc, keyword.cpc_evidence) &&
+        verifiedEvidenceMatchesCodes(keyword.fi, keyword.fi_evidence) &&
         keyword.f_term_evidence.every(
           (evidence) => evidence.status === "database_verified",
         ) &&
@@ -697,6 +719,13 @@ function validateAnalysisReadyForCharge(result: AnalysisResult): void {
         Array.isArray(keyword.cpc_candidates) &&
         Array.isArray(keyword.fi_candidates) &&
         Array.isArray(keyword.f_term_candidates) &&
+        keyword.ipc_candidates.every(
+          (candidate) => candidate.system === "IPC",
+        ) &&
+        keyword.cpc_candidates.every(
+          (candidate) => candidate.system === "CPC",
+        ) &&
+        keyword.fi_candidates.every((candidate) => candidate.system === "FI") &&
         Boolean(keyword.classification_route) &&
         Array.isArray(keyword.classification_route?.ipc_cpc_area) &&
         keyword.classification_route!.ipc_cpc_area.every(
@@ -758,15 +787,6 @@ function appendWarning(
     : additionalWarning;
 }
 
-function buildAiSuggestedEvidence(
-  codes: string[],
-): ClassificationCodeEvidence[] {
-  return uniqueCodes(codes).map((code) => ({
-    code,
-    status: "ai_suggested",
-  }));
-}
-
 async function loadCatalogRowsForCodes(
   adminClient: SupabaseClient,
   system: CatalogClassificationSystem,
@@ -811,28 +831,106 @@ async function loadCatalogRowsForCodes(
   return rowsByCode;
 }
 
-function buildCodeEvidence(
-  codes: string[],
-  catalogRows: Map<string, ClassificationCandidate>,
-): ClassificationCodeEvidence[] {
-  return uniqueCodes(codes).map((code) => {
-    const row = catalogRows.get(normalizeClassificationCode(code));
+function addCatalogCodes(
+  target: Record<CatalogClassificationSystem, string[]>,
+  system: CatalogClassificationSystem,
+  codes: unknown,
+): void {
+  target[system].push(...uniqueCodes(codes));
+}
 
-    if (!row) {
-      return {
-        code,
-        status: "ai_suggested" as const,
-      };
+function collectExposedCatalogCodes(
+  result: AnalysisResult,
+): Record<CatalogClassificationSystem, string[]> {
+  const codes: Record<CatalogClassificationSystem, string[]> = {
+    IPC: [],
+    CPC: [],
+    FI: [],
+  };
+
+  for (const keyword of result.keywords) {
+    addCatalogCodes(codes, "IPC", keyword.ipc);
+    addCatalogCodes(codes, "CPC", keyword.cpc);
+    addCatalogCodes(codes, "FI", keyword.fi);
+    addCatalogCodes(
+      codes,
+      "IPC",
+      keyword.ipc_evidence?.map((item) => item.code),
+    );
+    addCatalogCodes(
+      codes,
+      "CPC",
+      keyword.cpc_evidence?.map((item) => item.code),
+    );
+    addCatalogCodes(
+      codes,
+      "FI",
+      keyword.fi_evidence?.map((item) => item.code),
+    );
+    addCatalogCodes(
+      codes,
+      "IPC",
+      keyword.ipc_candidates?.map((item) => item.code),
+    );
+    addCatalogCodes(
+      codes,
+      "CPC",
+      keyword.cpc_candidates?.map((item) => item.code),
+    );
+    addCatalogCodes(
+      codes,
+      "FI",
+      keyword.fi_candidates?.map((item) => item.code),
+    );
+
+    for (const area of keyword.classification_route?.ipc_cpc_area ?? []) {
+      if (area.system === "IPC" || area.system === "CPC") {
+        addCatalogCodes(codes, area.system, [area.code]);
+      }
     }
 
-    return {
-      code,
-      status: "database_verified" as const,
-      title_en: row.title_en,
-      title_ja: row.title_ja,
-      edition: row.edition,
-    };
-  });
+    for (const subdivision of keyword.classification_route?.fi_subdivisions ??
+      []) {
+      addCatalogCodes(codes, "FI", [subdivision.fi.code]);
+
+      for (const theme of subdivision.f_term_themes) {
+        addCatalogCodes(codes, "FI", theme.fi_codes);
+      }
+    }
+  }
+
+  return {
+    IPC: uniqueCodes(codes.IPC),
+    CPC: uniqueCodes(codes.CPC),
+    FI: uniqueCodes(codes.FI),
+  };
+}
+
+async function assertCatalogBackedClassificationCodes(
+  adminClient: SupabaseClient,
+  result: AnalysisResult,
+): Promise<void> {
+  const exposedCodes = collectExposedCatalogCodes(result);
+  const systems: CatalogClassificationSystem[] = ["IPC", "CPC", "FI"];
+  const catalogRows = await Promise.all(
+    systems.map((system) =>
+      loadCatalogRowsForCodes(adminClient, system, exposedCodes[system]),
+    ),
+  );
+
+  for (let index = 0; index < systems.length; index += 1) {
+    const system = systems[index];
+    const rows = catalogRows[index];
+    const missingCodes = exposedCodes[system].filter(
+      (code) => !rows.has(normalizeClassificationCode(code)),
+    );
+
+    if (missingCodes.length > 0) {
+      throw new Error(
+        `${system} catalog integrity check rejected codes absent from classification_titles: ${missingCodes.join(", ")}`,
+      );
+    }
+  }
 }
 
 function candidateTitle(candidate: ClassificationCandidate): string {
@@ -859,7 +957,6 @@ function calculateCandidateMatchScore(
   candidate: ClassificationCandidate,
   searchTerms: string[],
   rankingTerms: string[],
-  suggestedCodes: string[],
 ): number {
   const title = candidateTitle(candidate);
   const primarySearchTerm = searchTerms[0] ?? "";
@@ -873,12 +970,6 @@ function calculateCandidateMatchScore(
   const contextWords = Array.from(
     new Set(rankingTerms.flatMap(technicalTokens)),
   );
-  const suggestedPrefixes = suggestedCodes
-    .map(normalizeClassificationCode)
-    .filter(Boolean)
-    .map((code) => code.slice(0, Math.min(4, code.length)));
-  const normalizedCandidateCode = normalizeClassificationCode(candidate.code);
-
   let score = Math.min(0.42, Number(candidate.similarity_score) || 0);
 
   if (query && title.includes(query)) {
@@ -902,19 +993,7 @@ function calculateCandidateMatchScore(
   ).length;
   const contextCoverage =
     contextWords.length > 0 ? contextHits / contextWords.length : 0;
-  score += Math.min(
-    0.14,
-    contextHits * 0.018 + contextCoverage * 0.08,
-  );
-
-  if (
-    suggestedPrefixes.some(
-      (prefix) =>
-        prefix.length >= 3 && normalizedCandidateCode.startsWith(prefix),
-    )
-  ) {
-    score += 0.12;
-  }
+  score += Math.min(0.14, contextHits * 0.018 + contextCoverage * 0.08);
 
   return Math.max(0, Math.min(1, score));
 }
@@ -924,7 +1003,6 @@ async function searchClassificationCandidates(
   searchTerms: string[],
   system: CatalogClassificationSystem,
   contextTerms: string[],
-  suggestedCodes: string[],
 ): Promise<ClassificationCandidate[]> {
   const uniqueSearchTerms = Array.from(
     new Set(searchTerms.map((term) => term.trim()).filter(Boolean)),
@@ -947,6 +1025,10 @@ async function searchClassificationCandidates(
 
     for (const rawCandidate of data ?? []) {
       const candidate = rawCandidate as ClassificationCandidate;
+      if (candidate.system !== system || !candidate.code) {
+        continue;
+      }
+
       const normalizedCode = normalizeClassificationCode(candidate.code);
       const previous = candidatesByCode.get(normalizedCode);
 
@@ -975,7 +1057,6 @@ async function searchClassificationCandidates(
         candidate,
         uniqueSearchTerms,
         contextTerms,
-        suggestedCodes,
       );
 
       return {
@@ -1373,7 +1454,6 @@ async function searchFTermAspectCandidates(
         candidate,
         uniqueSearchTerms,
         contextTerms,
-        [],
       );
 
       return {
@@ -1404,16 +1484,12 @@ async function lookupAndRankClassifications(
   result: AnalysisResult,
 ): Promise<AnalysisResult> {
   let warning = result.warning;
-  const modelCodeHints = result.keywords.map((keyword) => ({
-    ipc: [...keyword.ipc],
-    cpc: [...keyword.cpc],
-  }));
 
   const enrichedKeywords: KeywordClassification[] = result.keywords.map(
     (keyword) => ({
       ...keyword,
       // Every route step is replaced by a technically scored catalog result.
-      // Model-proposed codes are search hints only and are never displayed.
+      // Model output is never accepted as a classification-code source.
       ipc: [],
       cpc: [],
       fi: [],
@@ -1465,24 +1541,23 @@ async function lookupAndRankClassifications(
       keywordIndexes.map(async (keywordIndex) => {
         const keyword = enrichedKeywords[keywordIndex];
 
-        const { searchTerms, rankingTerms } =
-          buildClassificationLookupContext(keyword, contextTerms);
+        const { searchTerms, rankingTerms } = buildClassificationLookupContext(
+          keyword,
+          contextTerms,
+        );
 
-        const modelHints = modelCodeHints[keywordIndex];
         const [ipcCandidates, cpcCandidates] = await Promise.all([
           searchClassificationCandidates(
             adminClient,
             searchTerms,
             "IPC",
             rankingTerms,
-            modelHints.ipc,
           ),
           searchClassificationCandidates(
             adminClient,
             searchTerms,
             "CPC",
             rankingTerms,
-            modelHints.cpc,
           ),
         ]);
 
@@ -1508,7 +1583,6 @@ async function lookupAndRankClassifications(
                 searchTerms,
                 "FI",
                 rankingTerms,
-                selectedAreas.map((candidate) => candidate.code),
               )
             : [];
         const fiCandidates = rawFiCandidates
@@ -1639,6 +1713,11 @@ async function lookupAndRankClassifications(
         : catalogBackedCount > 0
           ? "medium"
           : "low";
+
+    keyword.reason =
+      catalogBackedCount > 0
+        ? "Classification candidates were retrieved from Supabase and ranked against the complete technical interpretation. No model-generated classification code was accepted."
+        : "No Supabase classification record passed the technical-context threshold. Classification codes were left empty rather than generated by AI.";
   }
 
   warning = appendWarning(
@@ -1688,12 +1767,12 @@ Tasks:
 - For every keyword, create a technical_interpretation that separates: the technical object; its function; structure or operating mechanism; material, energy, or signal handled; purpose or technical effect; neighboring context terms; and 2-6 concise search phrases.
 - Interpret each keyword in the context of the claimed combination, not as an isolated dictionary term. Preserve limiting relationships such as "mounted on", "responsive to", "between", "wirelessly coupled", and relevant numerical or material constraints in the search phrases.
 - Count occurrences across direct terms and clear synonyms; rank by descending frequency.
-- Suggest IPC and CPC only when supportable; these suggestions are used as retrieval anchors.
-- Always return empty fi and f_term arrays. The server derives FI and F-term only from technically scored database records after your response.
+- Do not generate, infer, copy, or suggest IPC, CPC, FI, or F-term codes.
+- Always return empty ipc, cpc, fi, and f_term arrays. The server derives every classification code exclusively from Supabase catalog records after your response.
 - Include a concise, specific reason grounded in the input text.
 - Use low confidence when classification support is weak.
-- Do not claim that any code is database verified. The server performs database verification after your response.
-- Do not invent FI, F-term, IPC, or CPC codes.`,
+- Do not include a classification-like alphanumeric symbol in any code array, technical interpretation, search phrase, or reason.
+- Do not claim that any code is database verified. The server performs database retrieval and an independent catalog-integrity check after your response.`,
           },
         ],
       },
@@ -1882,10 +1961,7 @@ Deno.serve(async (request: Request) => {
     });
 
     auditStage = "database_capability_check";
-    await confirmRequiredDatabaseFunctions(
-      supabaseUrl,
-      supabaseServiceRoleKey,
-    );
+    await confirmRequiredDatabaseFunctions(supabaseUrl, supabaseServiceRoleKey);
     logAnalysisAudit("ready", {
       stage: "database_capabilities_confirmed",
       user_id: auditUserId,
@@ -1900,6 +1976,8 @@ Deno.serve(async (request: Request) => {
     try {
       auditStage = "classification_lookup";
       result = await lookupAndRankClassifications(adminClient, aiResult);
+      auditStage = "classification_integrity_check";
+      await assertCatalogBackedClassificationCodes(adminClient, result);
     } catch (classificationError) {
       console.error("Classification lookup failed:", classificationError);
 

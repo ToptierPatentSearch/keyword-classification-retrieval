@@ -935,14 +935,20 @@ async function loadCatalogRowsForCodes(
   system: CatalogClassificationSystem,
   codes: string[],
 ): Promise<Map<string, ClassificationCandidate>> {
-  // These values came directly from search_classification_titles. Recheck the
-  // exact stored code instead of assuming the importer's normalized_code
-  // format matches the Edge Function's normalization rule.
-  const catalogCodes = uniqueCodes(codes);
+  // Recheck every exposed code against the catalog's normalized key. Catalog
+  // imports and RPC results can format the same stored code with different
+  // spaces or punctuation, so an exact comparison on `code` can falsely reject
+  // a database-backed result. This still fails closed: no model-provided code
+  // is accepted unless a row with the same normalized code and system exists.
+  const normalizedCatalogCodes = Array.from(
+    new Set(
+      uniqueCodes(codes).map(normalizeClassificationCode).filter(Boolean),
+    ),
+  );
   const rowsByCode = new Map<string, ClassificationCandidate>();
 
-  for (let start = 0; start < catalogCodes.length; start += 100) {
-    const codeBatch = catalogCodes.slice(start, start + 100);
+  for (let start = 0; start < normalizedCatalogCodes.length; start += 100) {
+    const codeBatch = normalizedCatalogCodes.slice(start, start + 100);
 
     const { data, error } = await adminClient
       .from("classification_titles")
@@ -950,7 +956,7 @@ async function loadCatalogRowsForCodes(
         "system, code, normalized_code, title_en, title_ja, parent_code, hierarchy_level, edition",
       )
       .eq("system", system)
-      .in("code", codeBatch)
+      .in("normalized_code", codeBatch)
       .order("edition", { ascending: false });
 
     if (error) {
@@ -959,7 +965,9 @@ async function loadCatalogRowsForCodes(
 
     for (const rawRow of data ?? []) {
       const row = rawRow as Omit<ClassificationCandidate, "similarity_score">;
-      const normalizedCode = normalizeClassificationCode(row.code);
+      const normalizedCode =
+        normalizeClassificationCode(row.normalized_code ?? "") ||
+        normalizeClassificationCode(row.code);
 
       if (!rowsByCode.has(normalizedCode)) {
         rowsByCode.set(normalizedCode, {

@@ -1,216 +1,406 @@
 import Footer from "./components/Footer";
-import termsOfUseText from './components/terms-of-use.txt?raw';
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import termsOfUseText from "./components/terms-of-use.txt?raw";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import AdminUserActivity from "./components/AdminUserActivity";
-import type { Session } from '@supabase/supabase-js';
-import { supabase } from './supabaseClient';
+import type { Session } from "@supabase/supabase-js";
+import { supabase } from "./supabaseClient";
 import type {
   AnalysisResult,
-  ClassificationCandidateEvidence,
-  ClassificationCodeEvidence,
-  ClassificationSystem,
-} from './types';
-import { PricingPlans } from './components/PricingPlans';
-type PlanId = 'test' | 'business';
+  ClassificationRouteCode,
+  KeywordClassification,
+  TechnicalInterpretation,
+} from "./types";
+import { PricingPlans } from "./components/PricingPlans";
+type PlanId = "test" | "business";
 
-type ClassificationEvidenceCellProps = {
-  system: ClassificationSystem;
-  codes: string[];
-  evidence?: ClassificationCodeEvidence[];
-  candidates?: ClassificationCandidateEvidence[];
-};
-
-function ClassificationEvidenceCell({
-  system,
-  codes,
-  evidence,
-  candidates,
-}: ClassificationEvidenceCellProps) {
-  const fTermIsAiOnly = system === 'F-term';
-  const evidenceItems: ClassificationCodeEvidence[] = (
-    evidence && evidence.length > 0
-      ? evidence
-      : codes.map((code) => ({
-        code,
-        status: 'ai_suggested' as const,
-      }))
-  )
-    .map((item) =>
-      fTermIsAiOnly
-        ? { ...item, status: 'ai_suggested' as const }
-        : item,
-    );
-
-  const suggestedCodeKeys = new Set(
-    evidenceItems.map((item) =>
-      item.code.toUpperCase().replace(/[^A-Z0-9]/g, ''),
-    ),
-  );
-
-  const additionalCandidates = (fTermIsAiOnly ? [] : (candidates ?? []))
-    .filter(
-      (candidate) =>
-        !suggestedCodeKeys.has(
-          candidate.code.toUpperCase().replace(/[^A-Z0-9]/g, ''),
-        ),
-    )
-    .slice(0, 3);
-
-  if (evidenceItems.length === 0 && additionalCandidates.length === 0) {
-    return (
-      <span style={{ color: '#64748b', fontSize: '0.8rem' }}>
-        {fTermIsAiOnly
-          ? 'No AI-suggested F-term.'
-          : system === 'FI'
-          ? 'No FI candidate found in the currently imported FI coverage.'
-          : '—'}
-      </span>
-    );
+function TechnicalInterpretationCell({
+  interpretation,
+}: {
+  interpretation?: TechnicalInterpretation;
+}) {
+  if (!interpretation) {
+    return <span style={{ color: "#64748b" }}>—</span>;
   }
 
+  const listText = (values: string[]) =>
+    Array.isArray(values) && values.length > 0 ? values.join("; ") : "—";
+  const fields = [
+    ["Object/system", interpretation.object_or_system || "—"],
+    ["Purpose or problem", interpretation.purpose_or_problem || "—"],
+    ["Application/use", interpretation.application_or_use || "—"],
+    ["Components", listText(interpretation.components)],
+    [
+      "Component relationships",
+      listText(interpretation.component_relationships),
+    ],
+    ["Material/composition", listText(interpretation.material_or_composition)],
+    [
+      "Manufacturing or processing steps",
+      listText(interpretation.manufacturing_or_processing_steps),
+    ],
+    ["Operation", interpretation.operation || "—"],
+    ["Control means", listText(interpretation.control_means)],
+    ["Controlled variable", listText(interpretation.controlled_variables)],
+    ["Operating conditions", listText(interpretation.operating_conditions)],
+    ["Technical effect", interpretation.technical_effect || "—"],
+  ];
+
   return (
-    <div style={{ display: 'grid', gap: '0.7rem', minWidth: '13rem' }}>
-      {evidenceItems.map((item, index) => {
-        const databaseVerified =
-          !fTermIsAiOnly && item.status === 'database_verified';
-        const title = item.title_en || item.title_ja;
-
-        return (
-          <div
-            key={`${system}-${item.code}-${index}`}
-            style={{
-              paddingBottom: '0.55rem',
-              borderBottom: '1px solid #e2e8f0',
-            }}
-          >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                flexWrap: 'wrap',
-                gap: '0.4rem',
-              }}
-            >
-              <strong>{item.code}</strong>
-              <span
-                style={{
-                  display: 'inline-flex',
-                  padding: '0.2rem 0.5rem',
-                  borderRadius: '999px',
-                  background: databaseVerified ? '#dcfce7' : '#dbeafe',
-                  color: databaseVerified ? '#166534' : '#1e40af',
-                  fontSize: '0.72rem',
-                  fontWeight: 800,
-                  whiteSpace: fTermIsAiOnly ? 'normal' : 'nowrap',
-                }}
-              >
-                {databaseVerified
-                  ? 'Database verified'
-                  : fTermIsAiOnly
-                    ? 'AI suggested · not database verified'
-                    : 'AI suggested'}
-              </span>
-            </div>
-
-            {title && (
-              <div
-                style={{
-                  marginTop: '0.25rem',
-                  color: '#64748b',
-                  fontSize: '0.78rem',
-                  lineHeight: 1.35,
-                }}
-              >
-                {title}
-                {item.edition ? ` · ${item.edition}` : ''}
-              </div>
-            )}
-          </div>
-        );
-      })}
-
-      {additionalCandidates.length > 0 && (
-        <div style={{ display: 'grid', gap: '0.45rem' }}>
-          <span
-            style={{
-              color: '#475569',
-              fontSize: '0.72rem',
-              fontWeight: 800,
-              textTransform: 'uppercase',
-              letterSpacing: '0.04em',
-            }}
-          >
-            Database candidates
-          </span>
-          {additionalCandidates.map((candidate) => {
-            const title = candidate.title_en || candidate.title_ja;
-            const score = Math.max(
-              0,
-              Math.min(
-                1,
-                candidate.match_score ?? candidate.similarity_score ?? 0,
-              ),
-            );
-
-            return (
-              <div
-                key={`${system}-candidate-${candidate.code}`}
-                style={{
-                  padding: '0.45rem 0.55rem',
-                  border: '1px solid #e2e8f0',
-                  borderRadius: '0.65rem',
-                  background: '#f8fafc',
-                }}
-              >
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    flexWrap: 'wrap',
-                    gap: '0.4rem',
-                  }}
-                >
-                  <strong>{candidate.code}</strong>
-                  <span
-                    style={{
-                      color: '#6d28d9',
-                      background: '#ede9fe',
-                      borderRadius: '999px',
-                      padding: '0.16rem 0.45rem',
-                      fontSize: '0.7rem',
-                      fontWeight: 800,
-                    }}
-                  >
-                    Candidate {Math.round(score * 100)}%
-                  </span>
-                </div>
-                {title && (
-                  <div
-                    style={{
-                      marginTop: '0.2rem',
-                      color: '#64748b',
-                      fontSize: '0.76rem',
-                      lineHeight: 1.35,
-                    }}
-                  >
-                    {title}
-                    {candidate.edition ? ` · ${candidate.edition}` : ''}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+    <div style={{ display: "grid", gap: "0.32rem", minWidth: "15rem" }}>
+      {fields.map(([label, value]) => (
+        <div key={label} style={{ fontSize: "0.76rem", lineHeight: 1.35 }}>
+          <strong>{label}:</strong> {value}
+        </div>
+      ))}
+      {interpretation.search_phrases.length > 0 && (
+        <div
+          style={{ color: "#475569", fontSize: "0.72rem", lineHeight: 1.35 }}
+        >
+          <strong>Retrieval phrases:</strong>{" "}
+          {interpretation.search_phrases.join("; ")}
         </div>
       )}
     </div>
   );
 }
 
-function asErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'An unexpected error occurred.';
+function RouteCodeCard({
+  item,
+  label,
+}: {
+  item: ClassificationRouteCode;
+  label?: string;
+}) {
+  const title = item.title_en || item.title_ja;
+  const score =
+    typeof item.match_score === "number"
+      ? Math.round(Math.max(0, Math.min(1, item.match_score)) * 100)
+      : null;
+
+  return (
+    <div
+      style={{
+        padding: "0.55rem 0.65rem",
+        border: "1px solid #cbd5e1",
+        borderRadius: "0.7rem",
+        background: "#ffffff",
+      }}
+    >
+      <div style={{ display: "flex", gap: "0.4rem", flexWrap: "wrap" }}>
+        {label && (
+          <span
+            style={{ color: "#475569", fontSize: "0.7rem", fontWeight: 800 }}
+          >
+            {label}
+          </span>
+        )}
+        <strong>{item.code}</strong>
+        {score !== null && (
+          <span
+            style={{ color: "#166534", fontSize: "0.7rem", fontWeight: 800 }}
+          >
+            {score}/100
+          </span>
+        )}
+      </div>
+      {title && (
+        <div
+          style={{ marginTop: "0.2rem", color: "#64748b", fontSize: "0.74rem" }}
+        >
+          {title}
+          {item.edition ? ` · ${item.edition}` : ""}
+        </div>
+      )}
+    </div>
+  );
 }
 
-const PENDING_ANALYSIS_REQUEST_KEY = 'kcr_pending_analysis_request_v2';
+function RouteArrow() {
+  return (
+    <div aria-hidden="true" style={{ color: "#64748b", fontWeight: 900 }}>
+      ↓
+    </div>
+  );
+}
+
+function ClassificationRouteCell({
+  keyword,
+}: {
+  keyword: KeywordClassification;
+}) {
+  const route = keyword.classification_route;
+
+  if (!route) {
+    return (
+      <span style={{ color: "#b45309", fontSize: "0.8rem" }}>
+        Classification route unavailable. Deploy the matching analyze Edge
+        Function.
+      </span>
+    );
+  }
+
+  return (
+    <div
+      style={{ display: "grid", gap: "0.55rem", minWidth: 0, width: "100%" }}
+    >
+      <div
+        style={{
+          padding: "0.65rem",
+          borderRadius: "0.75rem",
+          background: "#eff6ff",
+        }}
+      >
+        <div style={{ color: "#1e40af", fontSize: "0.72rem", fontWeight: 900 }}>
+          1 · TECHNICAL CONCEPT
+        </div>
+        <TechnicalInterpretationCell interpretation={route.technical_concept} />
+      </div>
+
+      <RouteArrow />
+
+      <div
+        style={{
+          padding: "0.65rem",
+          borderRadius: "0.75rem",
+          background: "#f5f3ff",
+        }}
+      >
+        <div style={{ color: "#5b21b6", fontSize: "0.72rem", fontWeight: 900 }}>
+          2 · IPC/CPC AREA
+        </div>
+        {route.ipc_cpc_area.length > 0 ? (
+          <div style={{ display: "grid", gap: "0.4rem", marginTop: "0.4rem" }}>
+            {route.ipc_cpc_area.map((area) => (
+              <RouteCodeCard
+                key={`${area.system}-${area.code}`}
+                item={area}
+                label={area.system}
+              />
+            ))}
+          </div>
+        ) : (
+          <div
+            style={{
+              marginTop: "0.35rem",
+              color: "#64748b",
+              fontSize: "0.76rem",
+            }}
+          >
+            No technically supported catalog area; downstream routing was
+            withheld.
+          </div>
+        )}
+      </div>
+
+      <RouteArrow />
+
+      <div
+        style={{
+          padding: "0.65rem",
+          borderRadius: "0.75rem",
+          background: "#ecfdf5",
+        }}
+      >
+        <div style={{ color: "#166534", fontSize: "0.72rem", fontWeight: 900 }}>
+          3 · FI SUBDIVISION
+        </div>
+        {route.fi_subdivisions.length > 0 ? (
+          <div style={{ display: "grid", gap: "0.65rem", marginTop: "0.4rem" }}>
+            {route.fi_subdivisions.map((subdivision) => (
+              <div key={subdivision.fi.code}>
+                <RouteCodeCard item={subdivision.fi} label="FI" />
+                <div
+                  style={{
+                    margin: "0.25rem 0 0.35rem",
+                    color: "#475569",
+                    fontSize: "0.7rem",
+                  }}
+                >
+                  Linked from: {subdivision.parent_area_codes.join(", ")}
+                </div>
+
+                <div
+                  style={{
+                    marginLeft: "0.8rem",
+                    paddingLeft: "0.65rem",
+                    borderLeft: "3px solid #86efac",
+                  }}
+                >
+                  <div
+                    style={{
+                      color: "#166534",
+                      fontSize: "0.72rem",
+                      fontWeight: 900,
+                    }}
+                  >
+                    4 · F-TERM THEME → ASPECT
+                  </div>
+                  {subdivision.f_term_themes.length > 0 ? (
+                    subdivision.f_term_themes.map((theme) => (
+                      <div
+                        key={`${subdivision.fi.code}-${theme.theme_code}`}
+                        style={{ marginTop: "0.45rem" }}
+                      >
+                        <div style={{ fontSize: "0.76rem", fontWeight: 800 }}>
+                          Theme {theme.theme_code}
+                          {theme.title_en || theme.title_ja
+                            ? ` · ${theme.title_en || theme.title_ja}`
+                            : ""}
+                        </div>
+                        <div
+                          style={{
+                            display: "grid",
+                            gap: "0.35rem",
+                            marginTop: "0.35rem",
+                          }}
+                        >
+                          {theme.aspects.map((aspect) => (
+                            <RouteCodeCard
+                              key={`${theme.theme_code}-${aspect.code}`}
+                              item={aspect}
+                              label={`Aspect ${aspect.viewpoint_code ?? ""}`.trim()}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div
+                      style={{
+                        marginTop: "0.35rem",
+                        color: "#64748b",
+                        fontSize: "0.76rem",
+                      }}
+                    >
+                      No theme/aspect combination passed the FI-scoped
+                      threshold.
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div
+            style={{
+              marginTop: "0.35rem",
+              color: "#64748b",
+              fontSize: "0.76rem",
+            }}
+          >
+            No FI subdivision could be linked to the selected IPC/CPC area.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function KeywordResultCard({ keyword }: { keyword: KeywordClassification }) {
+  const synonyms = Array.isArray(keyword.synonyms) ? keyword.synonyms : [];
+
+  return (
+    <article
+      style={{
+        width: "100%",
+        maxWidth: "54rem",
+        margin: "0 auto",
+        padding: "1rem",
+        border: "1px solid #cbd5e1",
+        borderRadius: "1rem",
+        background: "#f8fafc",
+        display: "grid",
+        gap: "0.85rem",
+      }}
+    >
+      <header style={{ display: "grid", gap: "0.35rem" }}>
+        <div
+          style={{
+            color: "#475569",
+            fontSize: "0.72rem",
+            fontWeight: 900,
+            letterSpacing: "0.04em",
+          }}
+        >
+          KEYWORD {keyword.rank}
+        </div>
+        <h3 style={{ margin: 0 }}>{keyword.term}</h3>
+      </header>
+
+      <section style={{ display: "grid", gap: "0.25rem" }}>
+        <strong style={{ fontSize: "0.76rem", color: "#475569" }}>
+          Normalized term
+        </strong>
+        <span>{keyword.normalized_term}</span>
+      </section>
+
+      <section style={{ display: "grid", gap: "0.4rem" }}>
+        <strong style={{ fontSize: "0.76rem", color: "#475569" }}>
+          Synonyms and alternative technical names
+        </strong>
+        {synonyms.length > 0 ? (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
+            {synonyms.map((synonym) => (
+              <span
+                key={synonym}
+                style={{
+                  padding: "0.25rem 0.5rem",
+                  border: "1px solid #bfdbfe",
+                  borderRadius: "999px",
+                  background: "#eff6ff",
+                  color: "#1e3a8a",
+                  fontSize: "0.76rem",
+                }}
+              >
+                {synonym}
+              </span>
+            ))}
+          </div>
+        ) : (
+          <span style={{ color: "#64748b", fontSize: "0.8rem" }}>
+            No distinct contextual synonym was identified.
+          </span>
+        )}
+      </section>
+
+      <ClassificationRouteCell keyword={keyword} />
+
+      <section
+        style={{
+          display: "grid",
+          gap: "0.5rem",
+          padding: "0.75rem",
+          borderRadius: "0.75rem",
+          background: "#ffffff",
+        }}
+      >
+        <div>
+          <strong>Occurrences:</strong> {keyword.count}
+        </div>
+        <div>
+          <strong>Rank:</strong> {keyword.rank}
+        </div>
+        <div>
+          <strong>Confidence:</strong>{" "}
+          <span className={`badge ${keyword.classification_confidence}`}>
+            {keyword.classification_confidence}
+          </span>
+        </div>
+        <div>
+          <strong>Reason:</strong> {keyword.reason}
+        </div>
+      </section>
+    </article>
+  );
+}
+
+function asErrorMessage(error: unknown): string {
+  return error instanceof Error
+    ? error.message
+    : "An unexpected error occurred.";
+}
+
+const PENDING_ANALYSIS_REQUEST_KEY = "kcr_pending_analysis_request_v2";
 
 type PendingAnalysisRequest = {
   userId: string;
@@ -228,11 +418,11 @@ async function createAnalysisInputFingerprint(
       selected_keywords: selectedKeywords,
     }),
   );
-  const digest = await crypto.subtle.digest('SHA-256', encodedInput);
+  const digest = await crypto.subtle.digest("SHA-256", encodedInput);
 
   return Array.from(new Uint8Array(digest))
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('');
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
 
 function readPendingAnalysisRequest(): PendingAnalysisRequest | null {
@@ -247,16 +437,16 @@ function readPendingAnalysisRequest(): PendingAnalysisRequest | null {
 
     const parsed = JSON.parse(storedValue) as Partial<PendingAnalysisRequest>;
     const validRequestId =
-      typeof parsed.requestId === 'string' &&
+      typeof parsed.requestId === "string" &&
       /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
         parsed.requestId,
       );
     const validFingerprint =
-      typeof parsed.inputFingerprint === 'string' &&
+      typeof parsed.inputFingerprint === "string" &&
       /^[0-9a-f]{64}$/i.test(parsed.inputFingerprint);
 
     if (
-      typeof parsed.userId !== 'string' ||
+      typeof parsed.userId !== "string" ||
       !parsed.userId ||
       !validRequestId ||
       !validFingerprint
@@ -298,17 +488,20 @@ function formatEstimatedDuration(totalSeconds: number): string {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
 
-  return seconds === 0 ? `${minutes} minute${minutes === 1 ? '' : 's'}` : `${minutes} min ${seconds} sec`;
+  return seconds === 0
+    ? `${minutes} minute${minutes === 1 ? "" : "s"}`
+    : `${minutes} min ${seconds} sec`;
 }
 
 function estimateResultTime(characterCount: number): string {
   if (characterCount === 0) {
-    return 'Estimated analysis time: enter English or Japanese text to calculate.';
+    return "Estimated analysis time: enter English or Japanese text to calculate.";
   }
 
   const inputBlocks = Math.ceil(characterCount / 500);
-  const minimumSeconds = 20 + (inputBlocks * 8);
-  const maximumSeconds = minimumSeconds + 20 + (Math.ceil(characterCount / 2000) * 10);
+  const minimumSeconds = 20 + inputBlocks * 8;
+  const maximumSeconds =
+    minimumSeconds + 20 + Math.ceil(characterCount / 2000) * 10;
 
   return `Estimated analysis time for ${characterCount.toLocaleString()} characters: ${formatEstimatedDuration(minimumSeconds)}–${formatEstimatedDuration(maximumSeconds)}.`;
 }
@@ -326,9 +519,10 @@ function LandingPage({ onAcceptTerms }: LandingPageProps) {
         <h1>Keyword Classification Retrieval</h1>
 
         <p className="landing-lead">
-          This app helps classify patent-related keywords from English or Japanese
-          technical text and supports patent search preparation by organizing
-          likely technical terms and classification-related information.
+          This app helps classify patent-related keywords from English or
+          Japanese technical text and supports patent search preparation by
+          organizing likely technical terms and classification-related
+          information.
         </p>
 
         <div className="landing-section">
@@ -336,7 +530,9 @@ function LandingPage({ onAcceptTerms }: LandingPageProps) {
           <ul>
             <li>Classifies patent-related keywords from technical text.</li>
             <li>Supports English and Japanese patent text.</li>
-            <li>Helps organize terms for prior art search and patent analysis.</li>
+            <li>
+              Helps organize terms for prior art search and patent analysis.
+            </li>
             <li>Processes analysis securely after authentication.</li>
           </ul>
         </div>
@@ -375,27 +571,23 @@ function LandingPage({ onAcceptTerms }: LandingPageProps) {
   );
 }
 
-
-
-
-
 function getTimeZoneOffsetMinutes(date: Date, timeZone: string): number | null {
   try {
-    const parts = new Intl.DateTimeFormat('en-US', {
+    const parts = new Intl.DateTimeFormat("en-US", {
       timeZone,
-      hourCycle: 'h23',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
+      hourCycle: "h23",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
     }).formatToParts(date);
 
     const values = Object.fromEntries(
       parts
-        .filter((part) => part.type !== 'literal')
-        .map((part) => [part.type, part.value])
+        .filter((part) => part.type !== "literal")
+        .map((part) => [part.type, part.value]),
     );
 
     const localTimeAsUtc = Date.UTC(
@@ -404,7 +596,7 @@ function getTimeZoneOffsetMinutes(date: Date, timeZone: string): number | null {
       Number(values.day),
       Number(values.hour),
       Number(values.minute),
-      Number(values.second)
+      Number(values.second),
     );
 
     return Math.round((localTimeAsUtc - date.getTime()) / 60000);
@@ -417,12 +609,12 @@ function getLocalTimeZoneAbbreviation(date: Date, timeZone: string): string {
   const offsetMinutes = getTimeZoneOffsetMinutes(date, timeZone);
 
   const fixedAbbreviations: Record<string, string> = {
-    'Asia/Tokyo': 'JST',
-    'Asia/Seoul': 'KST',
-    'Asia/Shanghai': 'CST',
-    'Asia/Hong_Kong': 'HKT',
-    'Asia/Singapore': 'SGT',
-    UTC: 'UTC',
+    "Asia/Tokyo": "JST",
+    "Asia/Seoul": "KST",
+    "Asia/Shanghai": "CST",
+    "Asia/Hong_Kong": "HKT",
+    "Asia/Singapore": "SGT",
+    UTC: "UTC",
   };
 
   if (fixedAbbreviations[timeZone]) {
@@ -431,32 +623,157 @@ function getLocalTimeZoneAbbreviation(date: Date, timeZone: string): string {
 
   const dstAwareAbbreviations: Record<
     string,
-    { standard: string; daylight: string; standardOffset: number; daylightOffset: number }
+    {
+      standard: string;
+      daylight: string;
+      standardOffset: number;
+      daylightOffset: number;
+    }
   > = {
-    'America/New_York': { standard: 'EST', daylight: 'EDT', standardOffset: -300, daylightOffset: -240 },
-    'America/Detroit': { standard: 'EST', daylight: 'EDT', standardOffset: -300, daylightOffset: -240 },
-    'America/Toronto': { standard: 'EST', daylight: 'EDT', standardOffset: -300, daylightOffset: -240 },
-    'America/Chicago': { standard: 'CST', daylight: 'CDT', standardOffset: -360, daylightOffset: -300 },
-    'America/Denver': { standard: 'MST', daylight: 'MDT', standardOffset: -420, daylightOffset: -360 },
-    'America/Los_Angeles': { standard: 'PST', daylight: 'PDT', standardOffset: -480, daylightOffset: -420 },
-    'America/Vancouver': { standard: 'PST', daylight: 'PDT', standardOffset: -480, daylightOffset: -420 },
-    'Europe/Berlin': { standard: 'CET', daylight: 'CEST', standardOffset: 60, daylightOffset: 120 },
-    'Europe/Paris': { standard: 'CET', daylight: 'CEST', standardOffset: 60, daylightOffset: 120 },
-    'Europe/Rome': { standard: 'CET', daylight: 'CEST', standardOffset: 60, daylightOffset: 120 },
-    'Europe/Madrid': { standard: 'CET', daylight: 'CEST', standardOffset: 60, daylightOffset: 120 },
-    'Europe/Amsterdam': { standard: 'CET', daylight: 'CEST', standardOffset: 60, daylightOffset: 120 },
-    'Europe/Brussels': { standard: 'CET', daylight: 'CEST', standardOffset: 60, daylightOffset: 120 },
-    'Europe/Vienna': { standard: 'CET', daylight: 'CEST', standardOffset: 60, daylightOffset: 120 },
-    'Europe/Zurich': { standard: 'CET', daylight: 'CEST', standardOffset: 60, daylightOffset: 120 },
-    'Europe/Stockholm': { standard: 'CET', daylight: 'CEST', standardOffset: 60, daylightOffset: 120 },
-    'Europe/Oslo': { standard: 'CET', daylight: 'CEST', standardOffset: 60, daylightOffset: 120 },
-    'Europe/Copenhagen': { standard: 'CET', daylight: 'CEST', standardOffset: 60, daylightOffset: 120 },
-    'Europe/Prague': { standard: 'CET', daylight: 'CEST', standardOffset: 60, daylightOffset: 120 },
-    'Europe/Warsaw': { standard: 'CET', daylight: 'CEST', standardOffset: 60, daylightOffset: 120 },
-    'Europe/Budapest': { standard: 'CET', daylight: 'CEST', standardOffset: 60, daylightOffset: 120 },
-    'Europe/London': { standard: 'GMT', daylight: 'BST', standardOffset: 0, daylightOffset: 60 },
-    'Australia/Sydney': { standard: 'AEST', daylight: 'AEDT', standardOffset: 600, daylightOffset: 660 },
-    'Australia/Melbourne': { standard: 'AEST', daylight: 'AEDT', standardOffset: 600, daylightOffset: 660 },
+    "America/New_York": {
+      standard: "EST",
+      daylight: "EDT",
+      standardOffset: -300,
+      daylightOffset: -240,
+    },
+    "America/Detroit": {
+      standard: "EST",
+      daylight: "EDT",
+      standardOffset: -300,
+      daylightOffset: -240,
+    },
+    "America/Toronto": {
+      standard: "EST",
+      daylight: "EDT",
+      standardOffset: -300,
+      daylightOffset: -240,
+    },
+    "America/Chicago": {
+      standard: "CST",
+      daylight: "CDT",
+      standardOffset: -360,
+      daylightOffset: -300,
+    },
+    "America/Denver": {
+      standard: "MST",
+      daylight: "MDT",
+      standardOffset: -420,
+      daylightOffset: -360,
+    },
+    "America/Los_Angeles": {
+      standard: "PST",
+      daylight: "PDT",
+      standardOffset: -480,
+      daylightOffset: -420,
+    },
+    "America/Vancouver": {
+      standard: "PST",
+      daylight: "PDT",
+      standardOffset: -480,
+      daylightOffset: -420,
+    },
+    "Europe/Berlin": {
+      standard: "CET",
+      daylight: "CEST",
+      standardOffset: 60,
+      daylightOffset: 120,
+    },
+    "Europe/Paris": {
+      standard: "CET",
+      daylight: "CEST",
+      standardOffset: 60,
+      daylightOffset: 120,
+    },
+    "Europe/Rome": {
+      standard: "CET",
+      daylight: "CEST",
+      standardOffset: 60,
+      daylightOffset: 120,
+    },
+    "Europe/Madrid": {
+      standard: "CET",
+      daylight: "CEST",
+      standardOffset: 60,
+      daylightOffset: 120,
+    },
+    "Europe/Amsterdam": {
+      standard: "CET",
+      daylight: "CEST",
+      standardOffset: 60,
+      daylightOffset: 120,
+    },
+    "Europe/Brussels": {
+      standard: "CET",
+      daylight: "CEST",
+      standardOffset: 60,
+      daylightOffset: 120,
+    },
+    "Europe/Vienna": {
+      standard: "CET",
+      daylight: "CEST",
+      standardOffset: 60,
+      daylightOffset: 120,
+    },
+    "Europe/Zurich": {
+      standard: "CET",
+      daylight: "CEST",
+      standardOffset: 60,
+      daylightOffset: 120,
+    },
+    "Europe/Stockholm": {
+      standard: "CET",
+      daylight: "CEST",
+      standardOffset: 60,
+      daylightOffset: 120,
+    },
+    "Europe/Oslo": {
+      standard: "CET",
+      daylight: "CEST",
+      standardOffset: 60,
+      daylightOffset: 120,
+    },
+    "Europe/Copenhagen": {
+      standard: "CET",
+      daylight: "CEST",
+      standardOffset: 60,
+      daylightOffset: 120,
+    },
+    "Europe/Prague": {
+      standard: "CET",
+      daylight: "CEST",
+      standardOffset: 60,
+      daylightOffset: 120,
+    },
+    "Europe/Warsaw": {
+      standard: "CET",
+      daylight: "CEST",
+      standardOffset: 60,
+      daylightOffset: 120,
+    },
+    "Europe/Budapest": {
+      standard: "CET",
+      daylight: "CEST",
+      standardOffset: 60,
+      daylightOffset: 120,
+    },
+    "Europe/London": {
+      standard: "GMT",
+      daylight: "BST",
+      standardOffset: 0,
+      daylightOffset: 60,
+    },
+    "Australia/Sydney": {
+      standard: "AEST",
+      daylight: "AEDT",
+      standardOffset: 600,
+      daylightOffset: 660,
+    },
+    "Australia/Melbourne": {
+      standard: "AEST",
+      daylight: "AEDT",
+      standardOffset: 600,
+      daylightOffset: 660,
+    },
   };
 
   const mappedZone = dstAwareAbbreviations[timeZone];
@@ -469,60 +786,60 @@ function getLocalTimeZoneAbbreviation(date: Date, timeZone: string): string {
     return mappedZone.standard;
   }
 
-  const timeZoneName = new Intl.DateTimeFormat('en-US', {
+  const timeZoneName = new Intl.DateTimeFormat("en-US", {
     timeZone,
-    hour: 'numeric',
-    timeZoneName: 'short',
+    hour: "numeric",
+    timeZoneName: "short",
   })
     .formatToParts(date)
-    .find((part) => part.type === 'timeZoneName')?.value;
+    .find((part) => part.type === "timeZoneName")?.value;
 
   return timeZoneName || timeZone;
 }
 
 function formatLocalExpirationDate(isoString: string | null): string {
-  if (!isoString) return '-';
+  if (!isoString) return "-";
 
   const date = new Date(isoString);
 
   if (Number.isNaN(date.getTime())) {
-    return '-';
+    return "-";
   }
 
   const localTimeZone =
-    Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
-  const formattedDate = new Intl.DateTimeFormat('en-US', {
+  const formattedDate = new Intl.DateTimeFormat("en-US", {
     timeZone: localTimeZone,
-    year: 'numeric',
-    month: 'short',
-    day: '2-digit',
-    hour: 'numeric',
-    minute: '2-digit',
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "numeric",
+    minute: "2-digit",
   }).format(date);
 
   return `${formattedDate} ${getLocalTimeZoneAbbreviation(date, localTimeZone)}`;
 }
 
 export default function App() {
-  const TERMS_ACCEPTED_KEY = 'kcr_terms_accepted';
+  const TERMS_ACCEPTED_KEY = "kcr_terms_accepted";
 
   const [termsAccepted, setTermsAccepted] = useState<boolean>(() => {
-    return window.localStorage.getItem(TERMS_ACCEPTED_KEY) === 'true';
+    return window.localStorage.getItem(TERMS_ACCEPTED_KEY) === "true";
   });
 
   const [session, setSession] = useState<Session | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
-  const [email, setEmail] = useState('');
+  const [email, setEmail] = useState("");
 
-  const [password, setPassword] = useState('');
-  const [authMode, setAuthMode] = useState<'sign-in' | 'sign-up'>('sign-in');
-  const [authMessage, setAuthMessage] = useState('');
-  const [text, setText] = useState('');
+  const [password, setPassword] = useState("");
+  const [authMode, setAuthMode] = useState<"sign-in" | "sign-up">("sign-in");
+  const [authMessage, setAuthMessage] = useState("");
+  const [text, setText] = useState("");
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState("");
   const [creditRefreshKey, setCreditRefreshKey] = useState(0);
   const [, setRemainingCreditsAfterAnalysis] = useState<number | null>(null);
   const [remainingCredits, setRemainingCredits] = useState<number | null>(null);
@@ -531,7 +848,7 @@ export default function App() {
   const analyzeInFlightRef = useRef(false);
   const pendingAnalyzeRequestRef = useRef<PendingAnalysisRequest | null>(null);
   function handleAcceptTerms() {
-    window.localStorage.setItem(TERMS_ACCEPTED_KEY, 'true');
+    window.localStorage.setItem(TERMS_ACCEPTED_KEY, "true");
     setTermsAccepted(true);
   }
 
@@ -556,31 +873,29 @@ export default function App() {
     }
 
     const params = new URLSearchParams(window.location.search);
-    const checkout = params.get('checkout');
-    const plan = params.get('purchasedPlan') as PlanId | null;
-    const fallbackPlan = window.localStorage.getItem('lastCheckoutPlan') as PlanId | null;
-    const nextPlan = plan === 'test' || plan === 'business' ? plan : fallbackPlan;
+    const checkout = params.get("checkout");
+    const plan = params.get("purchasedPlan") as PlanId | null;
+    const fallbackPlan = window.localStorage.getItem(
+      "lastCheckoutPlan",
+    ) as PlanId | null;
+    const nextPlan =
+      plan === "test" || plan === "business" ? plan : fallbackPlan;
 
-    if (checkout === 'success' && (nextPlan === 'test' || nextPlan === 'business')) {
+    if (
+      checkout === "success" &&
+      (nextPlan === "test" || nextPlan === "business")
+    ) {
       setRemainingCredits(null);
       setCreditRefreshKey((key) => key + 1);
-      window.localStorage.removeItem('lastCheckoutPlan');
+      window.localStorage.removeItem("lastCheckoutPlan");
 
-      window.history.replaceState(
-        {},
-        document.title,
-        window.location.pathname
-      );
+      window.history.replaceState({}, document.title, window.location.pathname);
     }
 
-    if (checkout === 'cancelled') {
-      window.localStorage.removeItem('lastCheckoutPlan');
+    if (checkout === "cancelled") {
+      window.localStorage.removeItem("lastCheckoutPlan");
 
-      window.history.replaceState(
-        {},
-        document.title,
-        window.location.pathname
-      );
+      window.history.replaceState({}, document.title, window.location.pathname);
     }
   }, [session?.user.id]);
 
@@ -596,9 +911,9 @@ export default function App() {
       }
 
       const { data, error } = await supabase
-        .from('user_credit_balances')
-        .select('remaining_credits, plan_mode, expires_at')
-        .eq('user_id', session.user.id)
+        .from("user_credit_balances")
+        .select("remaining_credits, plan_mode, expires_at")
+        .eq("user_id", session.user.id)
         .maybeSingle();
 
       if (cancelled) {
@@ -606,7 +921,7 @@ export default function App() {
       }
 
       if (error) {
-        console.error('Failed to fetch credit balance:', error);
+        console.error("Failed to fetch credit balance:", error);
         setRemainingCredits(0);
         setSelectedPlan(null);
         setCreditsExpireAt(null);
@@ -621,15 +936,13 @@ export default function App() {
       }
 
       const remaining =
-        typeof data.remaining_credits === 'number'
-          ? data.remaining_credits
-          : 0;
+        typeof data.remaining_credits === "number" ? data.remaining_credits : 0;
       const planMode =
-        data.plan_mode === 'test' || data.plan_mode === 'business'
+        data.plan_mode === "test" || data.plan_mode === "business"
           ? data.plan_mode
           : null;
       const expiresAt =
-        typeof data.expires_at === 'string' ? data.expires_at : null;
+        typeof data.expires_at === "string" ? data.expires_at : null;
       const isExpired = expiresAt
         ? new Date(expiresAt).getTime() <= Date.now()
         : false;
@@ -667,36 +980,36 @@ export default function App() {
   );
 
   const estimatedResultTime = fallbackEstimatedResultTime;
-  const creditsLoaded = typeof remainingCredits === 'number';
+  const creditsLoaded = typeof remainingCredits === "number";
   const hasCredits = creditsLoaded && remainingCredits > 0;
   const noCredits = !creditsLoaded || remainingCredits <= 0;
   const showPurchaseCards = noCredits && !loading && !result;
   const showInputCard = hasCredits || result !== null;
   async function handleAuth(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setError('');
-    setAuthMessage('');
+    setError("");
+    setAuthMessage("");
     setAuthLoading(true);
 
     try {
       const { error: authError } =
-        authMode === 'sign-in'
+        authMode === "sign-in"
           ? await supabase.auth.signInWithPassword({ email, password })
           : await supabase.auth.signUp({
-            email,
-            password,
-            options: {
-              emailRedirectTo: `${window.location.origin}/keyword-classification-retrieval/`,
-            },
-          });
+              email,
+              password,
+              options: {
+                emailRedirectTo: `${window.location.origin}/keyword-classification-retrieval/`,
+              },
+            });
       if (authError) {
         throw authError;
       }
 
       setAuthMessage(
-        authMode === 'sign-in'
-          ? 'Signed in successfully.'
-          : 'Sign-up requested. Check your email if confirmation is enabled.',
+        authMode === "sign-in"
+          ? "Signed in successfully."
+          : "Sign-up requested. Check your email if confirmation is enabled.",
       );
     } catch (authError) {
       setError(asErrorMessage(authError));
@@ -710,20 +1023,20 @@ export default function App() {
     }
 
     if (!session) {
-      setError('Please sign in before analyzing patent text.');
+      setError("Please sign in before analyzing patent text.");
       return;
     }
 
     const trimmedText = text.trim();
 
     if (!trimmedText) {
-      setError('Enter English or Japanese patent text to analyze.');
+      setError("Enter English or Japanese patent text to analyze.");
       return;
     }
 
     analyzeInFlightRef.current = true;
     setLoading(true);
-    setError('');
+    setError("");
     setResult(null);
     setRemainingCreditsAfterAnalysis(null);
 
@@ -734,13 +1047,21 @@ export default function App() {
       } = await supabase.auth.getSession();
 
       if (sessionError) {
-        throw new Error(`Unable to retrieve the signed-in session: ${sessionError.message}`);
+        throw new Error(
+          `Unable to retrieve the signed-in session: ${sessionError.message}`,
+        );
       }
 
       const accessToken = activeSession?.access_token;
 
-      if (!activeSession || !accessToken || activeSession.user.id !== session.user.id) {
-        throw new Error('Your signed-in session is no longer valid. Please sign in again.');
+      if (
+        !activeSession ||
+        !accessToken ||
+        activeSession.user.id !== session.user.id
+      ) {
+        throw new Error(
+          "Your signed-in session is no longer valid. Please sign in again.",
+        );
       }
 
       const selectedKeywords: string[] = [];
@@ -765,27 +1086,25 @@ export default function App() {
       pendingAnalyzeRequestRef.current = pendingRequest;
       storePendingAnalysisRequest(pendingRequest);
 
-      const { data, error: functionError } =
-        await supabase.functions.invoke<
-          AnalysisResult & {
-            requestId?: string;
-            remainingCredits: number;
-          }
-        >('analyze', {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-          body: {
-            input: trimmedText,
-            request_id: requestId,
-            selected_keywords: selectedKeywords,
-          },
-        });
+      const { data, error: functionError } = await supabase.functions.invoke<
+        AnalysisResult & {
+          requestId?: string;
+          remainingCredits: number;
+        }
+      >("analyze", {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: {
+          input: trimmedText,
+          request_id: requestId,
+          selected_keywords: selectedKeywords,
+        },
+      });
 
       if (functionError) {
-        const response = (
-          functionError as unknown as { context?: Response }
-        ).context;
+        const response = (functionError as unknown as { context?: Response })
+          .context;
 
         let errorBody: {
           error?: string;
@@ -804,7 +1123,7 @@ export default function App() {
         if (response?.status === 402) {
           pendingAnalyzeRequestRef.current = null;
           clearPendingAnalysisRequest();
-          setError('');
+          setError("");
           setResult(null);
           setRemainingCreditsAfterAnalysis(0);
           setRemainingCredits(0);
@@ -814,22 +1133,18 @@ export default function App() {
         }
 
         throw new Error(
-          errorBody?.error ??
-          errorBody?.message ??
-          functionError.message,
+          errorBody?.error ?? errorBody?.message ?? functionError.message,
         );
       }
 
       if (!data) {
         throw new Error(
-          'Analyze request completed without returning a result.',
+          "Analyze request completed without returning a result.",
         );
       }
 
-      if (typeof data.remainingCredits !== 'number') {
-        throw new Error(
-          'Analyze returned no updated credit balance.',
-        );
+      if (typeof data.remainingCredits !== "number") {
+        throw new Error("Analyze returned no updated credit balance.");
       }
 
       setResult(data);
@@ -852,9 +1167,9 @@ export default function App() {
   function handleClear() {
     pendingAnalyzeRequestRef.current = null;
     clearPendingAnalysisRequest();
-    setText('');
+    setText("");
     setResult(null);
-    setError('');
+    setError("");
     setRemainingCreditsAfterAnalysis(null);
   }
   async function handleDownloadPdf() {
@@ -863,10 +1178,10 @@ export default function App() {
     }
 
     setPdfLoading(true);
-    setError('');
+    setError("");
 
     try {
-      const { downloadAnalysisPdf } = await import('./pdf');
+      const { downloadAnalysisPdf } = await import("./pdf");
       downloadAnalysisPdf(result);
     } catch (pdfError) {
       setError(asErrorMessage(pdfError));
@@ -886,9 +1201,12 @@ export default function App() {
   }
 
   if (authLoading && !session) {
-    return <main className="shell"><p className="status-card">Loading authentication…</p></main>;
+    return (
+      <main className="shell">
+        <p className="status-card">Loading authentication…</p>
+      </main>
+    );
   }
-
 
   if (!session && !termsAccepted) {
     return <LandingPage onAcceptTerms={handleAcceptTerms} />;
@@ -901,25 +1219,49 @@ export default function App() {
           <p className="eyebrow">Patent AI Analysis</p>
           <h1>Sign in to classify patent keywords</h1>
           <p className="muted">
-            Sign in to securely classify patent keywords. Your text is processed through our secure backend after authentication.
+            Sign in to securely classify patent keywords. Your text is processed
+            through our secure backend after authentication.
           </p>
 
           <form onSubmit={handleAuth} className="auth-form">
             <label>
               Email
-              <input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required />
+              <input
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                required
+              />
             </label>
             <label>
               Password
-              <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required minLength={6} />
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                required
+                minLength={6}
+              />
             </label>
             <button className="primary" type="submit" disabled={authLoading}>
-              {authLoading ? 'Working…' : authMode === 'sign-in' ? 'Sign in' : 'Create account'}
+              {authLoading
+                ? "Working…"
+                : authMode === "sign-in"
+                  ? "Sign in"
+                  : "Create account"}
             </button>
           </form>
 
-          <button className="link-button" type="button" onClick={() => setAuthMode(authMode === 'sign-in' ? 'sign-up' : 'sign-in')}>
-            {authMode === 'sign-in' ? 'Need an account? Sign up' : 'Already have an account? Sign in'}
+          <button
+            className="link-button"
+            type="button"
+            onClick={() =>
+              setAuthMode(authMode === "sign-in" ? "sign-up" : "sign-in")
+            }
+          >
+            {authMode === "sign-in"
+              ? "Need an account? Sign up"
+              : "Already have an account? Sign in"}
           </button>
           {authMessage && <p className="success">{authMessage}</p>}
           {error && <p className="error">{error}</p>}
@@ -949,12 +1291,15 @@ export default function App() {
             </div>
           )}
           <p className="muted">
-            Extract normalized technical terms, rank frequencies, and map likely IPC, CPC, and FI codes plus AI-suggested F-term codes using a Supabase Edge Function.
+            Build a traceable classification route for each keyword: technical
+            concept → IPC/CPC area → FI subdivision → F-term theme/aspect.
           </p>
         </div>
         <div className="user-panel">
           <span>{session.user.email}</span>
-          <button type="button" className="secondary" onClick={handleSignOut}>Sign out</button>
+          <button type="button" className="secondary" onClick={handleSignOut}>
+            Sign out
+          </button>
         </div>
       </header>
       {showPurchaseCards && (
@@ -979,10 +1324,20 @@ export default function App() {
           />
           <p className="estimate">{estimatedResultTime}</p>
           <div className="actions">
-            <button className="primary" type="button" onClick={handleAnalyze} disabled={loading || !hasCredits}>
-              {loading ? 'Analyzing…' : 'Analyze'}
+            <button
+              className="primary"
+              type="button"
+              onClick={handleAnalyze}
+              disabled={loading || !hasCredits}
+            >
+              {loading ? "Analyzing…" : "Analyze"}
             </button>
-            <button className="secondary" type="button" onClick={handleClear} disabled={loading}>
+            <button
+              className="secondary"
+              type="button"
+              onClick={handleClear}
+              disabled={loading}
+            >
               Clear
             </button>
           </div>
@@ -992,7 +1347,8 @@ export default function App() {
 
       {loading && (
         <p className="status-card">
-          Analyzing text securely through Supabase Edge Functions… {estimatedResultTime}
+          Analyzing text securely through Supabase Edge Functions…{" "}
+          {estimatedResultTime}
         </p>
       )}
       {result && (
@@ -1000,82 +1356,42 @@ export default function App() {
           <div className="section-heading">
             <div>
               <h2>Results</h2>
-              <p className="muted">Detected language: <strong>{result.language}</strong></p>
-              <p className="muted" style={{ marginBottom: 0 }}>
-                IPC, CPC, and FI suggestions are marked <strong>Database verified</strong>{' '}
-                only when the code exists in the imported classification database.
-                Additional title-matched entries are displayed as <strong>Database candidates</strong>.
-                Unmatched codes remain <strong>AI suggested</strong>. F-term codes are{' '}
-                <strong>AI suggested only</strong>, are never marked database verified by this app,
-                and should be independently confirmed in J-PlatPat before use.
+              <p className="muted">
+                Detected language: <strong>{result.language}</strong>
               </p>
-
+              <p className="muted" style={{ marginBottom: 0 }}>
+                Every displayed code is catalog-backed and linked to the
+                preceding route step. An FI subdivision is withheld unless it
+                belongs to the selected IPC/CPC area; an F-term aspect is
+                withheld unless its theme and FI scope both match. The route is
+                search guidance, not an official classification assignment;
+                confirm the current FI/F-term scope and hierarchy in J-PlatPat.
+              </p>
             </div>
-            <button className="primary" type="button" onClick={handleDownloadPdf} disabled={!Array.isArray(result.keywords) || result.keywords.length === 0 || pdfLoading}>
-              {pdfLoading ? 'Preparing PDF…' : 'Download PDF'}
+            <button
+              className="primary"
+              type="button"
+              onClick={handleDownloadPdf}
+              disabled={
+                !Array.isArray(result.keywords) ||
+                result.keywords.length === 0 ||
+                pdfLoading
+              }
+            >
+              {pdfLoading ? "Preparing PDF…" : "Download PDF"}
             </button>
           </div>
           {result.warning && <p className="warning">{result.warning}</p>}
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Term</th>
-                  <th>Normalized Term</th>
-                  <th>Count</th>
-                  <th>Rank</th>
-                  <th>IPC</th>
-                  <th>CPC</th>
-                  <th>FI</th>
-                  <th>F-term (AI suggested only)</th>
-                  <th>Confidence</th>
-                  <th>Reason</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedKeywords.map((keyword) => (
-                  <tr key={`${keyword.rank}-${keyword.normalized_term}`}>
-                    <td>{keyword.term}</td>
-                    <td>{keyword.normalized_term}</td>
-                    <td>{keyword.count}</td>
-                    <td>{keyword.rank}</td>
-                    <td>
-                      <ClassificationEvidenceCell
-                        system="IPC"
-                        codes={keyword.ipc}
-                        evidence={keyword.ipc_evidence}
-                        candidates={keyword.ipc_candidates}
-                      />
-                    </td>
-                    <td>
-                      <ClassificationEvidenceCell
-                        system="CPC"
-                        codes={keyword.cpc}
-                        evidence={keyword.cpc_evidence}
-                        candidates={keyword.cpc_candidates}
-                      />
-                    </td>
-                    <td>
-                      <ClassificationEvidenceCell
-                        system="FI"
-                        codes={keyword.fi}
-                        evidence={keyword.fi_evidence}
-                        candidates={keyword.fi_candidates}
-                      />
-                    </td>
-                    <td>
-                      <ClassificationEvidenceCell
-                        system="F-term"
-                        codes={keyword.f_term}
-                        evidence={keyword.f_term_evidence}
-                      />
-                    </td>
-                    <td><span className={`badge ${keyword.classification_confidence}`}>{keyword.classification_confidence}</span></td>
-                    <td>{keyword.reason}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div
+            aria-label="Keyword analysis results in portrait layout"
+            style={{ display: "grid", gap: "1rem", marginTop: "1rem" }}
+          >
+            {sortedKeywords.map((keyword) => (
+              <KeywordResultCard
+                key={`${keyword.rank}-${keyword.normalized_term}`}
+                keyword={keyword}
+              />
+            ))}
           </div>
         </section>
       )}

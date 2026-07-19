@@ -71,7 +71,6 @@ export interface FiSubdivisionRoute {
 }
 
 export interface ClassificationRoute {
-  technical_concept: TechnicalInterpretation;
   ipc_cpc_area: ClassificationRouteCode[];
   fi_subdivisions: FiSubdivisionRoute[];
 }
@@ -80,7 +79,6 @@ export interface KeywordClassification {
   term: string;
   normalized_term: string;
   synonyms: string[];
-  technical_interpretation: TechnicalInterpretation;
   count: number;
   rank: number;
   ipc: string[];
@@ -102,7 +100,9 @@ export interface KeywordClassification {
 
 export interface AnalysisResult {
   language: PatentLanguage;
+  technical_concept: TechnicalInterpretation;
   keywords: KeywordClassification[];
+  analysisSchemaVersion: string;
   warning?: string;
   remainingCredits?: number;
 }

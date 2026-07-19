@@ -61,11 +61,18 @@ interface FTermThemeCandidate {
 }
 
 interface TechnicalInterpretation {
-  technical_object: string;
-  function: string;
-  structure_or_mechanism: string;
-  material_or_signal: string;
-  purpose_or_effect: string;
+  object_or_system: string;
+  purpose_or_problem: string;
+  application_or_use: string;
+  components: string[];
+  component_relationships: string[];
+  material_or_composition: string[];
+  manufacturing_or_processing_steps: string[];
+  operation: string;
+  control_means: string[];
+  controlled_variables: string[];
+  operating_conditions: string[];
+  technical_effect: string;
   context_terms: string[];
   search_phrases: string[];
 }
@@ -95,7 +102,6 @@ interface FiSubdivisionRoute {
 }
 
 interface ClassificationRoute {
-  technical_concept: TechnicalInterpretation;
   ipc_cpc_area: ClassificationRouteCode[];
   fi_subdivisions: FiSubdivisionRoute[];
 }
@@ -103,7 +109,7 @@ interface ClassificationRoute {
 interface KeywordClassification {
   term: string;
   normalized_term: string;
-  technical_interpretation: TechnicalInterpretation;
+  synonyms: string[];
   count: number;
   rank: number;
   ipc: string[];
@@ -125,7 +131,9 @@ interface KeywordClassification {
 
 interface AnalysisResult {
   language: PatentLanguage;
+  technical_concept: TechnicalInterpretation;
   keywords: KeywordClassification[];
+  analysisSchemaVersion?: string;
   warning?: string;
   requestId?: string;
   remainingCredits?: number;
@@ -164,6 +172,7 @@ const MAX_SELECTED_AREAS_PER_SYSTEM = 2;
 const MAX_SELECTED_FI = 2;
 const MAX_SELECTED_F_TERM_THEMES = 2;
 const MAX_SELECTED_F_TERMS = 3;
+const ANALYSIS_SCHEMA_VERSION = "common-concept-v2";
 const MODEL = Deno.env.get("OPENAI_MODEL") ?? "gpt-4.1-mini";
 const REQUIRED_DATABASE_FUNCTIONS = [
   "consume_analysis_credit_once_v2",
@@ -177,12 +186,88 @@ let requiredDatabaseFunctionsCheck: Promise<void> | null = null;
 const NO_CREDITS_MESSAGE =
   "分析クレジットがありません。Test pack または Business pack を購入してください。";
 
+const technicalConceptSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: [
+    "object_or_system",
+    "purpose_or_problem",
+    "application_or_use",
+    "components",
+    "component_relationships",
+    "material_or_composition",
+    "manufacturing_or_processing_steps",
+    "operation",
+    "control_means",
+    "controlled_variables",
+    "operating_conditions",
+    "technical_effect",
+    "context_terms",
+    "search_phrases",
+  ],
+  properties: {
+    object_or_system: { type: "string", minLength: 1 },
+    purpose_or_problem: { type: "string", minLength: 1 },
+    application_or_use: { type: "string", minLength: 1 },
+    components: {
+      type: "array",
+      minItems: 1,
+      maxItems: 12,
+      items: { type: "string" },
+    },
+    component_relationships: {
+      type: "array",
+      minItems: 1,
+      maxItems: 12,
+      items: { type: "string" },
+    },
+    material_or_composition: {
+      type: "array",
+      maxItems: 10,
+      items: { type: "string" },
+    },
+    manufacturing_or_processing_steps: {
+      type: "array",
+      maxItems: 12,
+      items: { type: "string" },
+    },
+    operation: { type: "string", minLength: 1 },
+    control_means: {
+      type: "array",
+      maxItems: 10,
+      items: { type: "string" },
+    },
+    controlled_variables: {
+      type: "array",
+      maxItems: 10,
+      items: { type: "string" },
+    },
+    operating_conditions: {
+      type: "array",
+      maxItems: 10,
+      items: { type: "string" },
+    },
+    technical_effect: { type: "string", minLength: 1 },
+    context_terms: {
+      type: "array",
+      maxItems: 8,
+      items: { type: "string" },
+    },
+    search_phrases: {
+      type: "array",
+      maxItems: 6,
+      items: { type: "string" },
+    },
+  },
+} as const;
+
 const responseSchema = {
   type: "object",
   additionalProperties: false,
-  required: ["language", "keywords"],
+  required: ["language", "technical_concept", "keywords"],
   properties: {
     language: { type: "string", enum: ["en", "ja"] },
+    technical_concept: technicalConceptSchema,
     keywords: {
       type: "array",
       maxItems: 40,
@@ -192,7 +277,7 @@ const responseSchema = {
         required: [
           "term",
           "normalized_term",
-          "technical_interpretation",
+          "synonyms",
           "count",
           "rank",
           "ipc",
@@ -205,35 +290,11 @@ const responseSchema = {
         properties: {
           term: { type: "string" },
           normalized_term: { type: "string" },
-          technical_interpretation: {
-            type: "object",
-            additionalProperties: false,
-            required: [
-              "technical_object",
-              "function",
-              "structure_or_mechanism",
-              "material_or_signal",
-              "purpose_or_effect",
-              "context_terms",
-              "search_phrases",
-            ],
-            properties: {
-              technical_object: { type: "string" },
-              function: { type: "string" },
-              structure_or_mechanism: { type: "string" },
-              material_or_signal: { type: "string" },
-              purpose_or_effect: { type: "string" },
-              context_terms: {
-                type: "array",
-                maxItems: 8,
-                items: { type: "string" },
-              },
-              search_phrases: {
-                type: "array",
-                maxItems: 6,
-                items: { type: "string" },
-              },
-            },
+          synonyms: {
+            type: "array",
+            minItems: 1,
+            maxItems: 8,
+            items: { type: "string" },
           },
           count: { type: "integer", minimum: 1 },
           rank: { type: "integer", minimum: 1 },
@@ -591,21 +652,52 @@ function cleanTextList(value: unknown, limit: number): string[] {
   ).slice(0, limit);
 }
 
+function cleanTextOrList(value: unknown, limit: number): string[] {
+  if (typeof value === "string") {
+    const normalized = value.trim();
+    return normalized ? [normalized] : [];
+  }
+
+  return cleanTextList(value, limit);
+}
+
 function normalizeTechnicalInterpretation(
   value: unknown,
   fallbackTerm: string,
 ): TechnicalInterpretation {
   const source =
     value && typeof value === "object"
-      ? (value as Partial<TechnicalInterpretation>)
+      ? (value as Record<string, unknown>)
       : {};
 
   return {
-    technical_object: String(source.technical_object ?? fallbackTerm).trim(),
-    function: String(source.function ?? "").trim(),
-    structure_or_mechanism: String(source.structure_or_mechanism ?? "").trim(),
-    material_or_signal: String(source.material_or_signal ?? "").trim(),
-    purpose_or_effect: String(source.purpose_or_effect ?? "").trim(),
+    object_or_system: String(
+      source.object_or_system ?? source.technical_object ?? fallbackTerm,
+    ).trim(),
+    purpose_or_problem: String(
+      source.purpose_or_problem ?? source.purpose_or_effect ?? "",
+    ).trim(),
+    application_or_use: String(source.application_or_use ?? "").trim(),
+    components: cleanTextOrList(source.components, 12),
+    component_relationships: cleanTextOrList(
+      source.component_relationships ?? source.structure_or_mechanism,
+      12,
+    ),
+    material_or_composition: cleanTextOrList(
+      source.material_or_composition ?? source.material_or_signal,
+      10,
+    ),
+    manufacturing_or_processing_steps: cleanTextOrList(
+      source.manufacturing_or_processing_steps,
+      12,
+    ),
+    operation: String(source.operation ?? source.function ?? "").trim(),
+    control_means: cleanTextOrList(source.control_means, 10),
+    controlled_variables: cleanTextOrList(source.controlled_variables, 10),
+    operating_conditions: cleanTextOrList(source.operating_conditions, 10),
+    technical_effect: String(
+      source.technical_effect ?? source.purpose_or_effect ?? "",
+    ).trim(),
     context_terms: cleanTextList(source.context_terms, 8),
     search_phrases: cleanTextList(source.search_phrases, 6),
   };
@@ -615,6 +707,15 @@ function normalizeResult(
   result: AnalysisResult,
   warning?: string,
 ): AnalysisResult {
+  const fallbackConceptTerm = Array.isArray(result.keywords)
+    ? String(
+        result.keywords[0]?.normalized_term ?? result.keywords[0]?.term ?? "",
+      ).trim()
+    : "";
+  const technicalConcept = normalizeTechnicalInterpretation(
+    result.technical_concept,
+    fallbackConceptTerm,
+  );
   const normalizedKeywords = (
     Array.isArray(result.keywords) ? result.keywords : []
   )
@@ -628,14 +729,20 @@ function normalizeResult(
 
       const normalizedTerm = String(keyword.normalized_term ?? "").trim();
       const term = String(keyword.term ?? "").trim();
+      const excludedSynonyms = new Set(
+        [term, normalizedTerm]
+          .map((value) => value.normalize("NFKC").toLowerCase())
+          .filter(Boolean),
+      );
+      const synonyms = cleanTextList(keyword.synonyms, 8).filter(
+        (synonym) =>
+          !excludedSynonyms.has(synonym.normalize("NFKC").toLowerCase()),
+      );
 
       return {
         term,
         normalized_term: normalizedTerm,
-        technical_interpretation: normalizeTechnicalInterpretation(
-          keyword.technical_interpretation,
-          normalizedTerm || term,
-        ),
+        synonyms,
         count: Math.max(1, Math.trunc(Number(keyword.count) || 1)),
         rank: Math.max(1, Math.trunc(Number(keyword.rank) || 1)),
         // Classification codes are never accepted from model output.
@@ -653,7 +760,9 @@ function normalizeResult(
 
   return {
     language: result.language === "ja" ? "ja" : "en",
+    technical_concept: technicalConcept,
     keywords: normalizedKeywords,
+    analysisSchemaVersion: ANALYSIS_SCHEMA_VERSION,
     ...(warning ? { warning } : {}),
   };
 }
@@ -680,8 +789,37 @@ function verifiedEvidenceMatchesCodes(
   );
 }
 
+function isValidTechnicalConcept(
+  concept: TechnicalInterpretation | undefined,
+): boolean {
+  return Boolean(
+    concept &&
+      concept.object_or_system.trim() &&
+      concept.purpose_or_problem.trim() &&
+      concept.application_or_use.trim() &&
+      concept.operation.trim() &&
+      concept.technical_effect.trim() &&
+      Array.isArray(concept.components) &&
+      concept.components.length > 0 &&
+      Array.isArray(concept.component_relationships) &&
+      concept.component_relationships.length > 0 &&
+      Array.isArray(concept.material_or_composition) &&
+      Array.isArray(concept.manufacturing_or_processing_steps) &&
+      Array.isArray(concept.control_means) &&
+      Array.isArray(concept.controlled_variables) &&
+      Array.isArray(concept.operating_conditions) &&
+      Array.isArray(concept.context_terms) &&
+      Array.isArray(concept.search_phrases),
+  );
+}
+
 function validateAnalysisReadyForCharge(result: AnalysisResult): void {
   const validLanguage = result.language === "en" || result.language === "ja";
+  const validSchemaVersion =
+    result.analysisSchemaVersion === ANALYSIS_SCHEMA_VERSION;
+  const validTechnicalConcept = isValidTechnicalConcept(
+    result.technical_concept,
+  );
   const validKeywordCount =
     Array.isArray(result.keywords) &&
     result.keywords.length > 0 &&
@@ -693,10 +831,10 @@ function validateAnalysisReadyForCharge(result: AnalysisResult): void {
       (keyword) =>
         Boolean(keyword.term.trim()) &&
         Boolean(keyword.normalized_term.trim()) &&
-        Boolean(keyword.technical_interpretation) &&
-        Boolean(keyword.technical_interpretation.technical_object.trim()) &&
-        Array.isArray(keyword.technical_interpretation.context_terms) &&
-        Array.isArray(keyword.technical_interpretation.search_phrases) &&
+        Array.isArray(keyword.synonyms) &&
+        keyword.synonyms.length > 0 &&
+        keyword.synonyms.length <= 8 &&
+        keyword.synonyms.every((synonym) => Boolean(synonym.trim())) &&
         Number.isInteger(keyword.count) &&
         keyword.count > 0 &&
         Number.isInteger(keyword.rank) &&
@@ -756,7 +894,12 @@ function validateAnalysisReadyForCharge(result: AnalysisResult): void {
         Boolean(keyword.reason.trim()),
     );
 
-  if (!validLanguage || !validKeywords) {
+  if (
+    !validLanguage ||
+    !validSchemaVersion ||
+    !validTechnicalConcept ||
+    !validKeywords
+  ) {
     throw new HttpError(
       502,
       "Analysis did not produce a complete valid result. No credit was consumed.",
@@ -1085,14 +1228,24 @@ async function searchClassificationCandidates(
 
 function buildClassificationLookupContext(
   keyword: KeywordClassification,
+  technicalConcept: TechnicalInterpretation,
   neighboringTerms: string[],
 ): ClassificationLookupContext {
-  const interpretation = keyword.technical_interpretation;
+  const interpretation = technicalConcept;
   const composedPhrases = [
-    `${interpretation.technical_object} ${interpretation.function}`,
-    `${interpretation.technical_object} ${interpretation.structure_or_mechanism}`,
-    `${interpretation.technical_object} ${interpretation.material_or_signal}`,
-    `${interpretation.technical_object} ${interpretation.purpose_or_effect}`,
+    `${interpretation.object_or_system} ${interpretation.purpose_or_problem}`,
+    `${interpretation.object_or_system} ${interpretation.application_or_use}`,
+    `${interpretation.object_or_system} ${interpretation.operation}`,
+    `${interpretation.object_or_system} ${interpretation.technical_effect}`,
+    ...interpretation.components.map(
+      (component) => `${interpretation.object_or_system} ${component}`,
+    ),
+    ...interpretation.component_relationships,
+    ...interpretation.material_or_composition,
+    ...interpretation.manufacturing_or_processing_steps,
+    ...interpretation.control_means,
+    ...interpretation.controlled_variables,
+    ...interpretation.operating_conditions,
   ];
 
   const searchTerms = Array.from(
@@ -1100,6 +1253,7 @@ function buildClassificationLookupContext(
       [
         keyword.normalized_term,
         keyword.term,
+        ...keyword.synonyms,
         ...interpretation.search_phrases,
         ...composedPhrases,
         ...interpretation.context_terms,
@@ -1115,11 +1269,19 @@ function buildClassificationLookupContext(
         ...searchTerms,
         keyword.normalized_term,
         keyword.term,
-        interpretation.technical_object,
-        interpretation.function,
-        interpretation.structure_or_mechanism,
-        interpretation.material_or_signal,
-        interpretation.purpose_or_effect,
+        ...keyword.synonyms,
+        interpretation.object_or_system,
+        interpretation.purpose_or_problem,
+        interpretation.application_or_use,
+        ...interpretation.components,
+        ...interpretation.component_relationships,
+        ...interpretation.material_or_composition,
+        ...interpretation.manufacturing_or_processing_steps,
+        interpretation.operation,
+        ...interpretation.control_means,
+        ...interpretation.controlled_variables,
+        ...interpretation.operating_conditions,
+        interpretation.technical_effect,
         ...interpretation.context_terms,
         ...interpretation.search_phrases,
         ...neighboringTerms,
@@ -1228,7 +1390,6 @@ function toRouteCode(
 }
 
 function buildClassificationRoute(
-  keyword: KeywordClassification,
   selectedAreas: ClassificationCandidate[],
   selectedFiCandidates: ClassificationCandidate[],
   selectedFTermCandidates: ClassificationCandidate[],
@@ -1266,7 +1427,6 @@ function buildClassificationRoute(
   });
 
   return {
-    technical_concept: keyword.technical_interpretation,
     ipc_cpc_area: ipcCpcArea,
     fi_subdivisions: fiSubdivisions,
   };
@@ -1503,7 +1663,6 @@ async function lookupAndRankClassifications(
       fi_candidates: [],
       f_term_candidates: [],
       classification_route: {
-        technical_concept: keyword.technical_interpretation,
         ipc_cpc_area: [],
         fi_subdivisions: [],
       },
@@ -1543,6 +1702,7 @@ async function lookupAndRankClassifications(
 
         const { searchTerms, rankingTerms } = buildClassificationLookupContext(
           keyword,
+          result.technical_concept,
           contextTerms,
         );
 
@@ -1679,7 +1839,6 @@ async function lookupAndRankClassifications(
         keywordResult.selectedFTermCandidates,
       );
       keyword.classification_route = buildClassificationRoute(
-        keyword,
         keywordResult.selectedAreas,
         keywordResult.selectedFiCandidates,
         keywordResult.selectedFTermCandidates,
@@ -1763,15 +1922,21 @@ Tasks:
 - Detect whether the dominant input language is English (en) or Japanese (ja).
 - Extract meaningful technical patent keywords and noun phrases; exclude stopwords, legal boilerplate, and generic verbs.
 - Normalize synonyms into a concise canonical normalized_term.
+- For every retrieved keyword, derive and return 1-8 contextually valid synonyms, abbreviations, alternative technical names, English/Japanese equivalents, or established retrieval variants. The synonyms array must never be empty and must not repeat term or normalized_term.
 - For Japanese input, preserve Japanese wording in term and use an English technical phrase in normalized_term whenever possible.
-- For every keyword, create a technical_interpretation that separates: the technical object; its function; structure or operating mechanism; material, energy, or signal handled; purpose or technical effect; neighboring context terms; and 2-6 concise search phrases.
+- Derive one common, document-level technical_concept from the complete input and place it at the top level of the JSON response, before keywords. Do not create a separate technical concept for each keyword.
+- The common technical_concept must contain these separate facets in this exact order: object/system; purpose or problem; application/use; components; component relationships; material/composition; manufacturing or processing steps; operation; control means; controlled variables; operating conditions; and technical effect.
+- Derive the common concept from the complete input, synthesizing information across all sentences and claimed relationships rather than copying only the first keyword.
+- object_or_system, purpose_or_problem, application_or_use, components, component_relationships, operation, and technical_effect must be meaningfully populated. Use technically necessary inferences grounded in the input, but do not fabricate unsupported components, conditions, or advantages.
+- Use concise strings for single-value facets and concise arrays for multi-value facets. Only non-core facets may be an empty string or empty array when the input does not support them.
+- Also return neighboring context terms and 2-6 concise search phrases derived from the complete technical concept.
 - Interpret each keyword in the context of the claimed combination, not as an isolated dictionary term. Preserve limiting relationships such as "mounted on", "responsive to", "between", "wirelessly coupled", and relevant numerical or material constraints in the search phrases.
 - Count occurrences across direct terms and clear synonyms; rank by descending frequency.
 - Do not generate, infer, copy, or suggest IPC, CPC, FI, or F-term codes.
 - Always return empty ipc, cpc, fi, and f_term arrays. The server derives every classification code exclusively from Supabase catalog records after your response.
 - Include a concise, specific reason grounded in the input text.
 - Use low confidence when classification support is weak.
-- Do not include a classification-like alphanumeric symbol in any code array, technical interpretation, search phrase, or reason.
+- Do not include a classification-like alphanumeric symbol in any synonym, code array, technical interpretation, search phrase, or reason.
 - Do not claim that any code is database verified. The server performs database retrieval and an independent catalog-integrity check after your response.`,
           },
         ],

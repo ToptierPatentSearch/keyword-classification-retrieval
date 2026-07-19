@@ -12,6 +12,7 @@ import type {
 } from "./types";
 import { PricingPlans } from "./components/PricingPlans";
 type PlanId = "test" | "business";
+const EXPECTED_ANALYSIS_SCHEMA_VERSION = "common-concept-v2";
 
 function TechnicalInterpretationCell({
   interpretation,
@@ -147,26 +148,11 @@ function ClassificationRouteCell({
         style={{
           padding: "0.65rem",
           borderRadius: "0.75rem",
-          background: "#eff6ff",
-        }}
-      >
-        <div style={{ color: "#1e40af", fontSize: "0.72rem", fontWeight: 900 }}>
-          1 · TECHNICAL CONCEPT
-        </div>
-        <TechnicalInterpretationCell interpretation={route.technical_concept} />
-      </div>
-
-      <RouteArrow />
-
-      <div
-        style={{
-          padding: "0.65rem",
-          borderRadius: "0.75rem",
           background: "#f5f3ff",
         }}
       >
         <div style={{ color: "#5b21b6", fontSize: "0.72rem", fontWeight: 900 }}>
-          2 · IPC/CPC AREA
+          1 · IPC/CPC AREA
         </div>
         {route.ipc_cpc_area.length > 0 ? (
           <div style={{ display: "grid", gap: "0.4rem", marginTop: "0.4rem" }}>
@@ -202,7 +188,7 @@ function ClassificationRouteCell({
         }}
       >
         <div style={{ color: "#166534", fontSize: "0.72rem", fontWeight: 900 }}>
-          3 · FI SUBDIVISION
+          2 · FI SUBDIVISION
         </div>
         {route.fi_subdivisions.length > 0 ? (
           <div style={{ display: "grid", gap: "0.65rem", marginTop: "0.4rem" }}>
@@ -233,7 +219,7 @@ function ClassificationRouteCell({
                       fontWeight: 900,
                     }}
                   >
-                    4 · F-TERM THEME → ASPECT
+                    3 · F-TERM THEME → ASPECT
                   </div>
                   {subdivision.f_term_themes.length > 0 ? (
                     subdivision.f_term_themes.map((theme) => (
@@ -1143,6 +1129,20 @@ export default function App() {
         );
       }
 
+      if (
+        data.analysisSchemaVersion !== EXPECTED_ANALYSIS_SCHEMA_VERSION ||
+        !data.technical_concept ||
+        !Array.isArray(data.keywords) ||
+        data.keywords.some(
+          (keyword: KeywordClassification) =>
+            !Array.isArray(keyword.synonyms) || keyword.synonyms.length === 0,
+        )
+      ) {
+        throw new Error(
+          "The deployed analyze Edge Function is outdated. Deploy the matching index(48).ts that returns common-concept-v2.",
+        );
+      }
+
       if (typeof data.remainingCredits !== "number") {
         throw new Error("Analyze returned no updated credit balance.");
       }
@@ -1382,6 +1382,36 @@ export default function App() {
             </button>
           </div>
           {result.warning && <p className="warning">{result.warning}</p>}
+          <section
+            style={{
+              width: "100%",
+              maxWidth: "54rem",
+              margin: "1rem auto 0",
+              padding: "1rem",
+              border: "1px solid #93c5fd",
+              borderRadius: "1rem",
+              background: "#eff6ff",
+              display: "grid",
+              gap: "0.6rem",
+            }}
+          >
+            <div
+              style={{
+                color: "#1e40af",
+                fontSize: "0.76rem",
+                fontWeight: 900,
+                letterSpacing: "0.04em",
+              }}
+            >
+              AI-DERIVED COMMON TECHNICAL CONCEPT
+            </div>
+            <p style={{ margin: 0, color: "#475569", fontSize: "0.8rem" }}>
+              This complete-input concept is shared by all retrieved keywords.
+            </p>
+            <TechnicalInterpretationCell
+              interpretation={result.technical_concept}
+            />
+          </section>
           <div
             aria-label="Keyword analysis results in portrait layout"
             style={{ display: "grid", gap: "1rem", marginTop: "1rem" }}

@@ -37,13 +37,53 @@ export function downloadAnalysisPdf(result: AnalysisResult): void {
     currentY += warningLines.length * 12 + 14;
   }
 
+  const concept = result.technical_concept;
+
+  autoTable(doc, {
+    startY: currentY,
+    margin: { left: 40, right: 40 },
+    head: [["AI-derived common technical concept", "Shared by all keywords"]],
+    body: [
+      ["Object/system", concept.object_or_system || "—"],
+      ["Purpose or problem", concept.purpose_or_problem || "—"],
+      ["Application/use", concept.application_or_use || "—"],
+      ["Components", joinValues(concept.components)],
+      ["Component relationships", joinValues(concept.component_relationships)],
+      ["Material/composition", joinValues(concept.material_or_composition)],
+      [
+        "Manufacturing or processing steps",
+        joinValues(concept.manufacturing_or_processing_steps),
+      ],
+      ["Operation", concept.operation || "—"],
+      ["Control means", joinValues(concept.control_means)],
+      ["Controlled variable", joinValues(concept.controlled_variables)],
+      ["Operating conditions", joinValues(concept.operating_conditions)],
+      ["Technical effect", concept.technical_effect || "—"],
+      ["Context terms", joinValues(concept.context_terms)],
+      ["Search phrases", joinValues(concept.search_phrases)],
+    ],
+    styles: {
+      fontSize: 9,
+      cellPadding: 5,
+      overflow: "linebreak",
+      valign: "top",
+    },
+    headStyles: { fillColor: [30, 64, 175], fontSize: 10 },
+    columnStyles: {
+      0: { cellWidth: 160, fontStyle: "bold", textColor: [51, 65, 85] },
+      1: { cellWidth: contentWidth - 160 },
+    },
+    rowPageBreak: "avoid",
+  });
+
+  currentY =
+    ((doc as AutoTableDocument).lastAutoTable?.finalY ?? currentY) + 22;
+
   for (const keyword of result.keywords) {
     if (currentY > pageHeight - 150) {
       doc.addPage("a4", "portrait");
       currentY = 40;
     }
-
-    const interpretation = keyword.technical_interpretation;
 
     autoTable(doc, {
       startY: currentY,
@@ -52,35 +92,6 @@ export function downloadAnalysisPdf(result: AnalysisResult): void {
       body: [
         ["Normalized term", keyword.normalized_term],
         ["Synonyms", joinValues(keyword.synonyms)],
-        ["Object/system", interpretation.object_or_system || "—"],
-        ["Purpose or problem", interpretation.purpose_or_problem || "—"],
-        ["Application/use", interpretation.application_or_use || "—"],
-        ["Components", joinValues(interpretation.components)],
-        [
-          "Component relationships",
-          joinValues(interpretation.component_relationships),
-        ],
-        [
-          "Material/composition",
-          joinValues(interpretation.material_or_composition),
-        ],
-        [
-          "Manufacturing or processing steps",
-          joinValues(interpretation.manufacturing_or_processing_steps),
-        ],
-        ["Operation", interpretation.operation || "—"],
-        ["Control means", joinValues(interpretation.control_means)],
-        [
-          "Controlled variable",
-          joinValues(interpretation.controlled_variables),
-        ],
-        [
-          "Operating conditions",
-          joinValues(interpretation.operating_conditions),
-        ],
-        ["Technical effect", interpretation.technical_effect || "—"],
-        ["Context terms", joinValues(interpretation.context_terms)],
-        ["Search phrases", joinValues(interpretation.search_phrases)],
         ["IPC", joinValues(keyword.ipc)],
         ["CPC", joinValues(keyword.cpc)],
         ["FI", joinValues(keyword.fi)],

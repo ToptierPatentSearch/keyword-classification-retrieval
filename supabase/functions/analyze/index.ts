@@ -1,15 +1,14 @@
-import OpenAI from 'npm:openai@^5.0.0';
+import OpenAI from "npm:openai@^5.0.0";
 import {
   createClient,
   type SupabaseClient,
-} from 'npm:@supabase/supabase-js@^2.44.4';
+} from "npm:@supabase/supabase-js@^2.44.4";
 
-type Confidence = 'high' | 'medium' | 'low';
-type PatentLanguage = 'en' | 'ja';
-type ClassificationSystem = 'IPC' | 'CPC' | 'FI';
-type ClassificationVerificationStatus =
-  | 'database_verified'
-  | 'ai_suggested';
+type Confidence = "high" | "medium" | "low";
+type PatentLanguage = "en" | "ja";
+type ClassificationSystem = "IPC" | "CPC" | "FI" | "F-term";
+type CatalogClassificationSystem = Exclude<ClassificationSystem, "F-term">;
+type ClassificationVerificationStatus = "database_verified" | "ai_suggested";
 
 interface AnalyzeRequest {
   text?: unknown;
@@ -24,6 +23,10 @@ interface ClassificationCodeEvidence {
   title_en?: string | null;
   title_ja?: string | null;
   edition?: string | null;
+  match_score?: number;
+  matched_terms?: string[];
+  theme_code?: string | null;
+  viewpoint_code?: string | null;
 }
 
 interface ClassificationCandidate {
@@ -37,11 +40,70 @@ interface ClassificationCandidate {
   edition: string;
   similarity_score: number;
   match_score?: number;
+  theme_code?: string | null;
+  viewpoint_code?: string | null;
+  theme_title_en?: string | null;
+  theme_title_ja?: string | null;
+  fi_scope?: string[];
+  matched_terms?: string[];
+  source_area_codes?: string[];
+}
+
+interface FTermThemeCandidate {
+  theme_code: string;
+  title_en: string | null;
+  title_ja: string | null;
+  edition: string;
+  similarity_score: number;
+  match_score?: number;
+  fi_scope: string[];
+  matched_terms?: string[];
+}
+
+interface TechnicalInterpretation {
+  technical_object: string;
+  function: string;
+  structure_or_mechanism: string;
+  material_or_signal: string;
+  purpose_or_effect: string;
+  context_terms: string[];
+  search_phrases: string[];
+}
+
+interface ClassificationLookupContext {
+  searchTerms: string[];
+  rankingTerms: string[];
+}
+
+interface ClassificationRouteCode extends ClassificationCodeEvidence {
+  system: ClassificationSystem;
+}
+
+interface FTermThemeRoute {
+  theme_code: string;
+  title_en?: string | null;
+  title_ja?: string | null;
+  edition?: string | null;
+  fi_codes: string[];
+  aspects: ClassificationRouteCode[];
+}
+
+interface FiSubdivisionRoute {
+  fi: ClassificationRouteCode;
+  parent_area_codes: string[];
+  f_term_themes: FTermThemeRoute[];
+}
+
+interface ClassificationRoute {
+  technical_concept: TechnicalInterpretation;
+  ipc_cpc_area: ClassificationRouteCode[];
+  fi_subdivisions: FiSubdivisionRoute[];
 }
 
 interface KeywordClassification {
   term: string;
   normalized_term: string;
+  technical_interpretation: TechnicalInterpretation;
   count: number;
   rank: number;
   ipc: string[];
@@ -55,6 +117,8 @@ interface KeywordClassification {
   ipc_candidates?: ClassificationCandidate[];
   cpc_candidates?: ClassificationCandidate[];
   fi_candidates?: ClassificationCandidate[];
+  f_term_candidates?: ClassificationCandidate[];
+  classification_route?: ClassificationRoute;
   classification_confidence: Confidence;
   reason: string;
 }
@@ -67,12 +131,18 @@ interface AnalysisResult {
   remainingCredits?: number;
 }
 
+interface CreditConsumptionResult {
+  consumed: boolean;
+  remaining_credits: number;
+  replayed: boolean;
+}
+
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers':
-    'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Max-Age': '86400',
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+  "Access-Control-Max-Age": "86400",
 };
 
 const MIN_INPUT_CHARS = 20;
@@ -86,49 +156,96 @@ const CLASSIFICATION_SEARCH_LIMIT = 30;
 const CANDIDATES_PER_SYSTEM = 3;
 const CANDIDATE_KEYWORD_LIMIT = 12;
 const CANDIDATE_SEARCH_CONCURRENCY = 3;
-const MODEL = Deno.env.get('OPENAI_MODEL') ?? 'gpt-4.1-mini';
+const FI_SELECTION_THRESHOLD = 0.58;
+const AREA_SELECTION_THRESHOLD = 0.52;
+const F_TERM_THEME_SELECTION_THRESHOLD = 0.48;
+const F_TERM_SELECTION_THRESHOLD = 0.64;
+const MAX_SELECTED_AREAS_PER_SYSTEM = 2;
+const MAX_SELECTED_FI = 2;
+const MAX_SELECTED_F_TERM_THEMES = 2;
+const MAX_SELECTED_F_TERMS = 3;
+const MODEL = Deno.env.get("OPENAI_MODEL") ?? "gpt-4.1-mini";
+const REQUIRED_DATABASE_FUNCTIONS = [
+  "consume_analysis_credit_once_v2",
+  "search_classification_titles",
+  "search_f_term_themes",
+  "search_f_term_titles",
+] as const;
+
+let requiredDatabaseFunctionsCheck: Promise<void> | null = null;
 
 const NO_CREDITS_MESSAGE =
-  '分析クレジットがありません。Test pack または Business pack を購入してください。';
+  "分析クレジットがありません。Test pack または Business pack を購入してください。";
 
 const responseSchema = {
-  type: 'object',
+  type: "object",
   additionalProperties: false,
-  required: ['language', 'keywords'],
+  required: ["language", "keywords"],
   properties: {
-    language: { type: 'string', enum: ['en', 'ja'] },
+    language: { type: "string", enum: ["en", "ja"] },
     keywords: {
-      type: 'array',
+      type: "array",
       maxItems: 40,
       items: {
-        type: 'object',
+        type: "object",
         additionalProperties: false,
         required: [
-          'term',
-          'normalized_term',
-          'count',
-          'rank',
-          'ipc',
-          'cpc',
-          'fi',
-          'f_term',
-          'classification_confidence',
-          'reason',
+          "term",
+          "normalized_term",
+          "technical_interpretation",
+          "count",
+          "rank",
+          "ipc",
+          "cpc",
+          "fi",
+          "f_term",
+          "classification_confidence",
+          "reason",
         ],
         properties: {
-          term: { type: 'string' },
-          normalized_term: { type: 'string' },
-          count: { type: 'integer', minimum: 1 },
-          rank: { type: 'integer', minimum: 1 },
-          ipc: { type: 'array', items: { type: 'string' } },
-          cpc: { type: 'array', items: { type: 'string' } },
-          fi: { type: 'array', items: { type: 'string' } },
-          f_term: { type: 'array', items: { type: 'string' } },
-          classification_confidence: {
-            type: 'string',
-            enum: ['high', 'medium', 'low'],
+          term: { type: "string" },
+          normalized_term: { type: "string" },
+          technical_interpretation: {
+            type: "object",
+            additionalProperties: false,
+            required: [
+              "technical_object",
+              "function",
+              "structure_or_mechanism",
+              "material_or_signal",
+              "purpose_or_effect",
+              "context_terms",
+              "search_phrases",
+            ],
+            properties: {
+              technical_object: { type: "string" },
+              function: { type: "string" },
+              structure_or_mechanism: { type: "string" },
+              material_or_signal: { type: "string" },
+              purpose_or_effect: { type: "string" },
+              context_terms: {
+                type: "array",
+                maxItems: 8,
+                items: { type: "string" },
+              },
+              search_phrases: {
+                type: "array",
+                maxItems: 6,
+                items: { type: "string" },
+              },
+            },
           },
-          reason: { type: 'string' },
+          count: { type: "integer", minimum: 1 },
+          rank: { type: "integer", minimum: 1 },
+          ipc: { type: "array", items: { type: "string" } },
+          cpc: { type: "array", items: { type: "string" } },
+          fi: { type: "array", items: { type: "string" } },
+          f_term: { type: "array", items: { type: "string" } },
+          classification_confidence: {
+            type: "string",
+            enum: ["high", "medium", "low"],
+          },
+          reason: { type: "string" },
         },
       },
     },
@@ -140,13 +257,18 @@ function jsonResponse(body: unknown, init: ResponseInit = {}) {
     ...init,
     headers: {
       ...corsHeaders,
-      'Content-Type': 'application/json; charset=utf-8',
+      "Content-Type": "application/json; charset=utf-8",
       ...(init.headers ?? {}),
     },
   });
 }
 
-type AnalysisAuditOutcome = 'started' | 'succeeded' | 'failed' | 'rejected';
+type AnalysisAuditOutcome =
+  | "started"
+  | "ready"
+  | "succeeded"
+  | "failed"
+  | "rejected";
 
 interface AnalysisAuditDetails {
   stage: string;
@@ -157,6 +279,7 @@ interface AnalysisAuditDetails {
   selected_keyword_count?: number;
   result_keyword_count?: number;
   remaining_credits?: number;
+  replayed?: boolean;
   status_code?: number;
   error_name?: string;
   error_message?: string;
@@ -168,18 +291,18 @@ function logAnalysisAudit(
   details: AnalysisAuditDetails,
 ): void {
   const entry = JSON.stringify({
-    event: 'analysis_audit',
+    event: "analysis_audit",
     outcome,
     occurred_at: new Date().toISOString(),
     ...details,
   });
 
-  if (outcome === 'failed') {
+  if (outcome === "failed") {
     console.error(entry);
     return;
   }
 
-  if (outcome === 'rejected') {
+  if (outcome === "rejected") {
     console.warn(entry);
     return;
   }
@@ -205,17 +328,88 @@ class HttpError extends Error {
   }
 }
 
+async function inspectRequiredDatabaseFunctions(
+  supabaseUrl: string,
+  serviceRoleKey: string,
+): Promise<void> {
+  const response = await fetch(`${supabaseUrl.replace(/\/$/, "")}/rest/v1/`, {
+    method: "GET",
+    headers: {
+      Accept: "application/openapi+json",
+      apikey: serviceRoleKey,
+      Authorization: `Bearer ${serviceRoleKey}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new HttpError(
+      503,
+      `Unable to confirm the required database functions (HTTP ${response.status}). No credit was consumed.`,
+    );
+  }
+
+  let openApiDocument: { paths?: Record<string, unknown> };
+
+  try {
+    openApiDocument = (await response.json()) as {
+      paths?: Record<string, unknown>;
+    };
+  } catch {
+    throw new HttpError(
+      503,
+      "Unable to read the database function catalog. No credit was consumed.",
+    );
+  }
+
+  const availablePaths = openApiDocument.paths ?? {};
+  const missingFunctions = REQUIRED_DATABASE_FUNCTIONS.filter(
+    (functionName) => {
+      const rpcPath = availablePaths[`/rpc/${functionName}`];
+
+      return !(
+        typeof rpcPath === "object" &&
+        rpcPath !== null &&
+        "post" in rpcPath
+      );
+    },
+  );
+
+  if (missingFunctions.length > 0) {
+    throw new HttpError(
+      503,
+      `Required database functions are missing: ${missingFunctions.join(", ")}. Deploy the matching SQL migration. No credit was consumed.`,
+    );
+  }
+}
+
+async function confirmRequiredDatabaseFunctions(
+  supabaseUrl: string,
+  serviceRoleKey: string,
+): Promise<void> {
+  if (!requiredDatabaseFunctionsCheck) {
+    requiredDatabaseFunctionsCheck = inspectRequiredDatabaseFunctions(
+      supabaseUrl,
+      serviceRoleKey,
+    );
+  }
+
+  try {
+    await requiredDatabaseFunctionsCheck;
+  } catch (error) {
+    // Permit a later request to recheck after a migration or temporary outage.
+    requiredDatabaseFunctionsCheck = null;
+    throw error;
+  }
+}
+
 function validateRequestId(value: unknown): string {
   if (
-    typeof value !== 'string' ||
+    typeof value !== "string" ||
     !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
       value,
     )
   ) {
-    throw new HttpError(
-      400,
-      'A valid request_id is required.',
-    );
+    throw new HttpError(400, "A valid request_id is required.");
   }
 
   return value;
@@ -223,17 +417,14 @@ function validateRequestId(value: unknown): string {
 
 function validateSelectedKeywords(value: unknown): string[] {
   if (!Array.isArray(value)) {
-    throw new HttpError(
-      400,
-      'selected_keywords must be an array.',
-    );
+    throw new HttpError(400, "selected_keywords must be an array.");
   }
 
   const keywords = value.map((item) => {
-    if (typeof item !== 'string' || !item.trim()) {
+    if (typeof item !== "string" || !item.trim()) {
       throw new HttpError(
         400,
-        'Every selected keyword must be a nonempty string.',
+        "Every selected keyword must be a nonempty string.",
       );
     }
 
@@ -243,20 +434,52 @@ function validateSelectedKeywords(value: unknown): string[] {
   return Array.from(new Set(keywords)).slice(0, 100);
 }
 
+function parseCreditConsumptionResult(value: unknown): CreditConsumptionResult {
+  const row = Array.isArray(value) ? value[0] : value;
+
+  if (!row || typeof row !== "object") {
+    throw new HttpError(
+      503,
+      "Credit finalization is temporarily unavailable. Retry the same request; idempotency prevents a duplicate charge.",
+    );
+  }
+
+  const record = row as Record<string, unknown>;
+  const remainingCredits = Number(record.remaining_credits);
+
+  if (
+    typeof record.consumed !== "boolean" ||
+    typeof record.replayed !== "boolean" ||
+    !Number.isInteger(remainingCredits) ||
+    remainingCredits < 0
+  ) {
+    throw new HttpError(
+      503,
+      "Credit finalization returned an invalid response. Retry the same request; idempotency prevents a duplicate charge.",
+    );
+  }
+
+  return {
+    consumed: record.consumed,
+    remaining_credits: remainingCredits,
+    replayed: record.replayed,
+  };
+}
+
 async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest(
-    'SHA-256',
+    "SHA-256",
     new TextEncoder().encode(value),
   );
 
   return Array.from(new Uint8Array(digest))
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('');
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
 }
 function validateText(body: AnalyzeRequest): string {
-  const rawText = typeof body.text === 'string' ? body.text : body.input;
+  const rawText = typeof body.text === "string" ? body.text : body.input;
 
-  if (typeof rawText !== 'string') {
+  if (typeof rawText !== "string") {
     throw new Error(
       'Request body must include a string field named "text" or "input".',
     );
@@ -286,11 +509,11 @@ function validateText(body: AnalyzeRequest): string {
 
   const repeatedCharacterPattern = new RegExp(
     `([\\s\\S])\\1{${MAX_REPEATED_CHAR_RUN},}`,
-    'u',
+    "u",
   );
 
   if (repeatedCharacterPattern.test(text)) {
-    throw new Error('Text appears to contain excessive repeated characters.');
+    throw new Error("Text appears to contain excessive repeated characters.");
   }
 
   const meaningfulChars =
@@ -298,7 +521,7 @@ function validateText(body: AnalyzeRequest): string {
   const meaningfulRatio = meaningfulChars / text.length;
 
   if (meaningfulRatio < MIN_MEANINGFUL_CHAR_RATIO) {
-    throw new Error('Text appears to contain too little meaningful content.');
+    throw new Error("Text appears to contain too little meaningful content.");
   }
 
   const words = text
@@ -317,7 +540,7 @@ function validateText(body: AnalyzeRequest): string {
     const duplicateRatio = maxRepeatedWordCount / words.length;
 
     if (duplicateRatio > MAX_DUPLICATE_WORD_RATIO) {
-      throw new Error('Text appears to contain excessive repeated words.');
+      throw new Error("Text appears to contain excessive repeated words.");
     }
   }
 
@@ -325,7 +548,7 @@ function validateText(body: AnalyzeRequest): string {
 }
 
 function normalizeClassificationCode(code: string): string {
-  return code.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  return code.toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
 function uniqueCodes(codes: unknown): string[] {
@@ -337,7 +560,7 @@ function uniqueCodes(codes: unknown): string[] {
   const unique: string[] = [];
 
   for (const value of codes) {
-    if (typeof value !== 'string') {
+    if (typeof value !== "string") {
       continue;
     }
 
@@ -355,37 +578,76 @@ function uniqueCodes(codes: unknown): string[] {
   return unique;
 }
 
+function cleanTextList(value: unknown, limit: number): string[] {
+  if (!Array.isArray(value)) return [];
+
+  return Array.from(
+    new Set(
+      value
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  ).slice(0, limit);
+}
+
+function normalizeTechnicalInterpretation(
+  value: unknown,
+  fallbackTerm: string,
+): TechnicalInterpretation {
+  const source =
+    value && typeof value === "object"
+      ? (value as Partial<TechnicalInterpretation>)
+      : {};
+
+  return {
+    technical_object: String(source.technical_object ?? fallbackTerm).trim(),
+    function: String(source.function ?? "").trim(),
+    structure_or_mechanism: String(source.structure_or_mechanism ?? "").trim(),
+    material_or_signal: String(source.material_or_signal ?? "").trim(),
+    purpose_or_effect: String(source.purpose_or_effect ?? "").trim(),
+    context_terms: cleanTextList(source.context_terms, 8),
+    search_phrases: cleanTextList(source.search_phrases, 6),
+  };
+}
+
 function normalizeResult(
   result: AnalysisResult,
   warning?: string,
 ): AnalysisResult {
-  const normalizedKeywords = (Array.isArray(result.keywords)
-    ? result.keywords
-    : [])
+  const normalizedKeywords = (
+    Array.isArray(result.keywords) ? result.keywords : []
+  )
     .map((keyword) => {
       const confidence: Confidence =
-        keyword.classification_confidence === 'high' ||
-          keyword.classification_confidence === 'medium' ||
-          keyword.classification_confidence === 'low'
+        keyword.classification_confidence === "high" ||
+        keyword.classification_confidence === "medium" ||
+        keyword.classification_confidence === "low"
           ? keyword.classification_confidence
-          : 'low';
+          : "low";
 
       const ipc = uniqueCodes(keyword.ipc);
       const cpc = uniqueCodes(keyword.cpc);
       const fi = uniqueCodes(keyword.fi);
       const fTerm = uniqueCodes(keyword.f_term);
+      const normalizedTerm = String(keyword.normalized_term ?? "").trim();
+      const term = String(keyword.term ?? "").trim();
 
       return {
-        term: String(keyword.term ?? '').trim(),
-        normalized_term: String(keyword.normalized_term ?? '').trim(),
+        term,
+        normalized_term: normalizedTerm,
+        technical_interpretation: normalizeTechnicalInterpretation(
+          keyword.technical_interpretation,
+          normalizedTerm || term,
+        ),
         count: Math.max(1, Math.trunc(Number(keyword.count) || 1)),
         rank: Math.max(1, Math.trunc(Number(keyword.rank) || 1)),
-        ipc: confidence === 'low' ? ipc.slice(0, 2) : ipc,
-        cpc: confidence === 'low' ? cpc.slice(0, 2) : cpc,
-        fi: confidence === 'low' ? fi.slice(0, 1) : fi,
-        f_term: confidence === 'low' ? fTerm.slice(0, 1) : fTerm,
+        ipc: confidence === "low" ? ipc.slice(0, 2) : ipc,
+        cpc: confidence === "low" ? cpc.slice(0, 2) : cpc,
+        fi: confidence === "low" ? fi.slice(0, 1) : fi,
+        f_term: confidence === "low" ? fTerm.slice(0, 1) : fTerm,
         classification_confidence: confidence,
-        reason: String(keyword.reason ?? '').trim(),
+        reason: String(keyword.reason ?? "").trim(),
       };
     })
     .filter((keyword) => keyword.term || keyword.normalized_term)
@@ -393,10 +655,98 @@ function normalizeResult(
     .map((keyword, index) => ({ ...keyword, rank: index + 1 }));
 
   return {
-    language: result.language === 'ja' ? 'ja' : 'en',
+    language: result.language === "ja" ? "ja" : "en",
     keywords: normalizedKeywords,
     ...(warning ? { warning } : {}),
   };
+}
+
+function validateAnalysisReadyForCharge(result: AnalysisResult): void {
+  const validLanguage = result.language === "en" || result.language === "ja";
+  const validKeywordCount =
+    Array.isArray(result.keywords) &&
+    result.keywords.length > 0 &&
+    result.keywords.length <= 40;
+
+  const validKeywords =
+    validKeywordCount &&
+    result.keywords.every(
+      (keyword) =>
+        Boolean(keyword.term.trim()) &&
+        Boolean(keyword.normalized_term.trim()) &&
+        Boolean(keyword.technical_interpretation) &&
+        Boolean(keyword.technical_interpretation.technical_object.trim()) &&
+        Array.isArray(keyword.technical_interpretation.context_terms) &&
+        Array.isArray(keyword.technical_interpretation.search_phrases) &&
+        Number.isInteger(keyword.count) &&
+        keyword.count > 0 &&
+        Number.isInteger(keyword.rank) &&
+        keyword.rank > 0 &&
+        Array.isArray(keyword.ipc) &&
+        Array.isArray(keyword.cpc) &&
+        Array.isArray(keyword.fi) &&
+        Array.isArray(keyword.f_term) &&
+        Array.isArray(keyword.ipc_evidence) &&
+        Array.isArray(keyword.cpc_evidence) &&
+        Array.isArray(keyword.fi_evidence) &&
+        Array.isArray(keyword.f_term_evidence) &&
+        keyword.f_term_evidence.every(
+          (evidence) => evidence.status === "database_verified",
+        ) &&
+        Array.isArray(keyword.ipc_candidates) &&
+        Array.isArray(keyword.cpc_candidates) &&
+        Array.isArray(keyword.fi_candidates) &&
+        Array.isArray(keyword.f_term_candidates) &&
+        Boolean(keyword.classification_route) &&
+        Array.isArray(keyword.classification_route?.ipc_cpc_area) &&
+        keyword.classification_route!.ipc_cpc_area.every(
+          (area) =>
+            (area.system === "IPC" || area.system === "CPC") &&
+            area.status === "database_verified",
+        ) &&
+        Array.isArray(keyword.classification_route?.fi_subdivisions) &&
+        keyword.classification_route!.fi_subdivisions.every(
+          (subdivision) =>
+            subdivision.fi.system === "FI" &&
+            subdivision.fi.status === "database_verified" &&
+            subdivision.parent_area_codes.length > 0 &&
+            subdivision.f_term_themes.every(
+              (theme) =>
+                Boolean(theme.theme_code) &&
+                theme.fi_codes.length > 0 &&
+                theme.aspects.every(
+                  (aspect) =>
+                    aspect.system === "F-term" &&
+                    aspect.status === "database_verified",
+                ),
+            ),
+        ) &&
+        (keyword.classification_confidence === "high" ||
+          keyword.classification_confidence === "medium" ||
+          keyword.classification_confidence === "low") &&
+        Boolean(keyword.reason.trim()),
+    );
+
+  if (!validLanguage || !validKeywords) {
+    throw new HttpError(
+      502,
+      "Analysis did not produce a complete valid result. No credit was consumed.",
+    );
+  }
+
+  try {
+    JSON.stringify(result);
+  } catch (serializationError) {
+    console.error(
+      "Analysis response serialization check failed:",
+      serializationError,
+    );
+
+    throw new HttpError(
+      502,
+      "Analysis result could not be prepared for delivery. No credit was consumed.",
+    );
+  }
 }
 
 function appendWarning(
@@ -413,13 +763,13 @@ function buildAiSuggestedEvidence(
 ): ClassificationCodeEvidence[] {
   return uniqueCodes(codes).map((code) => ({
     code,
-    status: 'ai_suggested',
+    status: "ai_suggested",
   }));
 }
 
 async function loadCatalogRowsForCodes(
   adminClient: SupabaseClient,
-  system: ClassificationSystem,
+  system: CatalogClassificationSystem,
   codes: string[],
 ): Promise<Map<string, ClassificationCandidate>> {
   const normalizedCodes = Array.from(
@@ -431,20 +781,20 @@ async function loadCatalogRowsForCodes(
     const codeBatch = normalizedCodes.slice(start, start + 100);
 
     const { data, error } = await adminClient
-      .from('classification_titles')
+      .from("classification_titles")
       .select(
-        'system, code, normalized_code, title_en, title_ja, parent_code, hierarchy_level, edition',
+        "system, code, normalized_code, title_en, title_ja, parent_code, hierarchy_level, edition",
       )
-      .eq('system', system)
-      .in('normalized_code', codeBatch)
-      .order('edition', { ascending: false });
+      .eq("system", system)
+      .in("normalized_code", codeBatch)
+      .order("edition", { ascending: false });
 
     if (error) {
       throw new Error(`${system} code lookup failed: ${error.message}`);
     }
 
     for (const rawRow of data ?? []) {
-      const row = rawRow as Omit<ClassificationCandidate, 'similarity_score'>;
+      const row = rawRow as Omit<ClassificationCandidate, "similarity_score">;
       const normalizedCode =
         row.normalized_code || normalizeClassificationCode(row.code);
 
@@ -471,13 +821,13 @@ function buildCodeEvidence(
     if (!row) {
       return {
         code,
-        status: 'ai_suggested' as const,
+        status: "ai_suggested" as const,
       };
     }
 
     return {
       code,
-      status: 'database_verified' as const,
+      status: "database_verified" as const,
       title_en: row.title_en,
       title_ja: row.title_ja,
       edition: row.edition,
@@ -486,31 +836,42 @@ function buildCodeEvidence(
 }
 
 function candidateTitle(candidate: ClassificationCandidate): string {
-  return `${candidate.title_en ?? ''} ${candidate.title_ja ?? ''}`
+  return `${candidate.title_en ?? ""} ${candidate.title_ja ?? ""} ${candidate.theme_title_en ?? ""} ${candidate.theme_title_ja ?? ""}`
     .trim()
     .toLowerCase();
 }
 
+function technicalTokens(text: string): string[] {
+  const normalized = text.normalize("NFKC").toLowerCase();
+  const latinTokens = normalized.match(/[a-z0-9][a-z0-9-]{2,}/g) ?? [];
+  const japaneseRuns =
+    normalized.match(/[\u3040-\u30ff\u3400-\u9fff]{2,}/g) ?? [];
+  const japaneseBigrams = japaneseRuns.flatMap((run) =>
+    Array.from({ length: Math.max(0, run.length - 1) }, (_, index) =>
+      run.slice(index, index + 2),
+    ),
+  );
+
+  return Array.from(new Set([...latinTokens, ...japaneseBigrams]));
+}
+
 function calculateCandidateMatchScore(
   candidate: ClassificationCandidate,
-  primarySearchTerm: string,
-  contextTerms: string[],
+  searchTerms: string[],
+  rankingTerms: string[],
   suggestedCodes: string[],
 ): number {
   const title = candidateTitle(candidate);
+  const primarySearchTerm = searchTerms[0] ?? "";
   const query = primarySearchTerm.trim().toLowerCase();
-  const queryWords = query
-    .split(/[^a-z0-9]+/)
-    .filter((word) => word.length >= 3);
+  const normalizedSearchTerms = searchTerms
+    .map((term) => term.normalize("NFKC").trim().toLowerCase())
+    .filter(Boolean);
+  const queryWords = Array.from(
+    new Set(normalizedSearchTerms.flatMap(technicalTokens)),
+  );
   const contextWords = Array.from(
-    new Set(
-      contextTerms.flatMap((term) =>
-        term
-          .toLowerCase()
-          .split(/[^a-z0-9]+/)
-          .filter((word) => word.length >= 4),
-      ),
-    ),
+    new Set(rankingTerms.flatMap(technicalTokens)),
   );
   const suggestedPrefixes = suggestedCodes
     .map(normalizeClassificationCode)
@@ -518,24 +879,41 @@ function calculateCandidateMatchScore(
     .map((code) => code.slice(0, Math.min(4, code.length)));
   const normalizedCandidateCode = normalizeClassificationCode(candidate.code);
 
-  let score = Number(candidate.similarity_score) || 0;
+  let score = Math.min(0.42, Number(candidate.similarity_score) || 0);
 
   if (query && title.includes(query)) {
-    score += 0.25;
+    score += 0.18;
   }
 
-  const queryWordHits = queryWords.filter((word) => title.includes(word)).length;
-  score += Math.min(0.12, queryWordHits * 0.04);
+  const exactPhraseHits = normalizedSearchTerms.filter(
+    (term) => term !== query && title.includes(term),
+  ).length;
+  score += Math.min(0.1, exactPhraseHits * 0.05);
 
-  const contextHits = contextWords.filter((word) => title.includes(word)).length;
-  score += Math.min(0.15, contextHits * 0.03);
+  const queryWordHits = queryWords.filter((word) =>
+    title.includes(word),
+  ).length;
+  const queryCoverage =
+    queryWords.length > 0 ? queryWordHits / queryWords.length : 0;
+  score += Math.min(0.16, queryCoverage * 0.16);
+
+  const contextHits = contextWords.filter((word) =>
+    title.includes(word),
+  ).length;
+  const contextCoverage =
+    contextWords.length > 0 ? contextHits / contextWords.length : 0;
+  score += Math.min(
+    0.14,
+    contextHits * 0.018 + contextCoverage * 0.08,
+  );
 
   if (
     suggestedPrefixes.some(
-      (prefix) => prefix.length >= 3 && normalizedCandidateCode.startsWith(prefix),
+      (prefix) =>
+        prefix.length >= 3 && normalizedCandidateCode.startsWith(prefix),
     )
   ) {
-    score += 0.2;
+    score += 0.12;
   }
 
   return Math.max(0, Math.min(1, score));
@@ -544,18 +922,18 @@ function calculateCandidateMatchScore(
 async function searchClassificationCandidates(
   adminClient: SupabaseClient,
   searchTerms: string[],
-  system: ClassificationSystem,
+  system: CatalogClassificationSystem,
   contextTerms: string[],
   suggestedCodes: string[],
 ): Promise<ClassificationCandidate[]> {
   const uniqueSearchTerms = Array.from(
     new Set(searchTerms.map((term) => term.trim()).filter(Boolean)),
-  ).slice(0, 2);
+  ).slice(0, 5);
   const candidatesByCode = new Map<string, ClassificationCandidate>();
 
   for (const searchText of uniqueSearchTerms) {
     const { data, error } = await adminClient.rpc(
-      'search_classification_titles',
+      "search_classification_titles",
       {
         search_text: searchText,
         requested_systems: [system],
@@ -564,9 +942,7 @@ async function searchClassificationCandidates(
     );
 
     if (error) {
-      throw new Error(
-        `${system} candidate search failed: ${error.message}`,
-      );
+      throw new Error(`${system} candidate search failed: ${error.message}`);
     }
 
     for (const rawCandidate of data ?? []) {
@@ -583,21 +959,37 @@ async function searchClassificationCandidates(
     }
   }
 
-  const primarySearchTerm = uniqueSearchTerms[0] ?? '';
+  const primarySearchTerm = uniqueSearchTerms[0] ?? "";
 
   return Array.from(candidatesByCode.values())
-    .map((candidate) => ({
-      ...candidate,
-      match_score: calculateCandidateMatchScore(
+    .map((candidate) => {
+      const matchedTerms = uniqueSearchTerms.filter((term) => {
+        const title = candidateTitle(candidate);
+        const tokens = technicalTokens(term);
+        return (
+          title.includes(term.toLowerCase()) ||
+          (tokens.length > 0 && tokens.some((token) => title.includes(token)))
+        );
+      });
+      const baseScore = calculateCandidateMatchScore(
         candidate,
-        primarySearchTerm,
+        uniqueSearchTerms,
         contextTerms,
         suggestedCodes,
-      ),
-    }))
+      );
+
+      return {
+        ...candidate,
+        matched_terms: matchedTerms,
+        match_score: Math.min(
+          1,
+          baseScore + Math.min(0.12, matchedTerms.length * 0.04),
+        ),
+      };
+    })
     .filter(
       (candidate) =>
-        (candidate.match_score ?? 0) >= 0.35 ||
+        (candidate.match_score ?? 0) >= 0.38 ||
         candidateTitle(candidate).includes(primarySearchTerm.toLowerCase()),
     )
     .sort(
@@ -610,79 +1002,443 @@ async function searchClassificationCandidates(
     .slice(0, CANDIDATES_PER_SYSTEM);
 }
 
-async function enrichAnalysisClassifications(
+function buildClassificationLookupContext(
+  keyword: KeywordClassification,
+  neighboringTerms: string[],
+): ClassificationLookupContext {
+  const interpretation = keyword.technical_interpretation;
+  const composedPhrases = [
+    `${interpretation.technical_object} ${interpretation.function}`,
+    `${interpretation.technical_object} ${interpretation.structure_or_mechanism}`,
+    `${interpretation.technical_object} ${interpretation.material_or_signal}`,
+    `${interpretation.technical_object} ${interpretation.purpose_or_effect}`,
+  ];
+
+  const searchTerms = Array.from(
+    new Set(
+      [
+        keyword.normalized_term,
+        keyword.term,
+        ...interpretation.search_phrases,
+        ...composedPhrases,
+        ...interpretation.context_terms,
+      ]
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ),
+  ).slice(0, 8);
+
+  const rankingTerms = Array.from(
+    new Set(
+      [
+        ...searchTerms,
+        keyword.normalized_term,
+        keyword.term,
+        interpretation.technical_object,
+        interpretation.function,
+        interpretation.structure_or_mechanism,
+        interpretation.material_or_signal,
+        interpretation.purpose_or_effect,
+        ...interpretation.context_terms,
+        ...interpretation.search_phrases,
+        ...neighboringTerms,
+      ]
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ),
+  );
+
+  return { searchTerms, rankingTerms };
+}
+
+function selectCandidates(
+  candidates: ClassificationCandidate[],
+  threshold: number,
+  limit: number,
+): ClassificationCandidate[] {
+  return candidates
+    .filter((candidate) => (candidate.match_score ?? 0) >= threshold)
+    .slice(0, limit);
+}
+
+function evidenceFromCandidates(
+  candidates: ClassificationCandidate[],
+): ClassificationCodeEvidence[] {
+  return candidates.map((candidate) => ({
+    code: candidate.code,
+    status: "database_verified",
+    title_en: candidate.title_en,
+    title_ja: candidate.title_ja,
+    edition: candidate.edition,
+    match_score: candidate.match_score,
+    matched_terms: candidate.matched_terms,
+    theme_code: candidate.theme_code,
+    viewpoint_code: candidate.viewpoint_code,
+  }));
+}
+
+function classificationMainGroup(code: string): string {
+  const match = code.toUpperCase().match(/^\s*([A-H]\d{2}[A-Z])\s*(\d+)/);
+
+  return match ? `${match[1]}${match[2]}` : "";
+}
+
+function candidateAreaCodes(
+  candidate: ClassificationCandidate,
+  areas: ClassificationCandidate[],
+): string[] {
+  const candidateCodes = [candidate.code, candidate.parent_code ?? ""].filter(
+    Boolean,
+  );
+
+  return areas
+    .filter((area) => {
+      const areaNormalized = normalizeClassificationCode(area.code);
+      const areaMainGroup = classificationMainGroup(area.code);
+
+      return candidateCodes.some((candidateCode) => {
+        const candidateNormalized = normalizeClassificationCode(candidateCode);
+        const candidateMainGroup = classificationMainGroup(candidateCode);
+
+        return Boolean(
+          areaNormalized &&
+            candidateNormalized &&
+            (candidateNormalized.startsWith(areaNormalized) ||
+              areaNormalized.startsWith(candidateNormalized) ||
+              (areaMainGroup &&
+                candidateMainGroup &&
+                areaMainGroup === candidateMainGroup)),
+        );
+      });
+    })
+    .map((area) => area.code);
+}
+
+function fiMatchesScope(fiCode: string, fiScope: string[]): boolean {
+  const normalizedFi = normalizeClassificationCode(fiCode);
+
+  return fiScope.some((scopeCode) => {
+    const normalizedScope = normalizeClassificationCode(scopeCode);
+    return Boolean(
+      normalizedFi &&
+        normalizedScope &&
+        (normalizedFi.startsWith(normalizedScope) ||
+          normalizedScope.startsWith(normalizedFi)),
+    );
+  });
+}
+
+function toRouteCode(
+  system: ClassificationSystem,
+  candidate: ClassificationCandidate,
+): ClassificationRouteCode {
+  return {
+    system,
+    code: candidate.code,
+    status: "database_verified",
+    title_en: candidate.title_en,
+    title_ja: candidate.title_ja,
+    edition: candidate.edition,
+    match_score: candidate.match_score,
+    matched_terms: candidate.matched_terms,
+    theme_code: candidate.theme_code,
+    viewpoint_code: candidate.viewpoint_code,
+  };
+}
+
+function buildClassificationRoute(
+  keyword: KeywordClassification,
+  selectedAreas: ClassificationCandidate[],
+  selectedFiCandidates: ClassificationCandidate[],
+  selectedFTermCandidates: ClassificationCandidate[],
+  selectedThemes: FTermThemeCandidate[],
+): ClassificationRoute {
+  const ipcCpcArea = selectedAreas.map((candidate) =>
+    toRouteCode(candidate.system, candidate),
+  );
+
+  const fiSubdivisions = selectedFiCandidates.map((fiCandidate) => {
+    const parentAreaCodes = candidateAreaCodes(fiCandidate, selectedAreas);
+    const scopedAspects = selectedFTermCandidates.filter((aspect) =>
+      fiMatchesScope(fiCandidate.code, aspect.fi_scope ?? []),
+    );
+
+    const fTermThemes = selectedThemes
+      .filter((theme) => fiMatchesScope(fiCandidate.code, theme.fi_scope))
+      .map((theme) => ({
+        theme_code: theme.theme_code,
+        title_en: theme.title_en,
+        title_ja: theme.title_ja,
+        edition: theme.edition,
+        fi_codes: [fiCandidate.code],
+        aspects: scopedAspects
+          .filter((aspect) => aspect.theme_code === theme.theme_code)
+          .map((aspect) => toRouteCode("F-term", aspect)),
+      }))
+      .filter((theme) => theme.aspects.length > 0);
+
+    return {
+      fi: toRouteCode("FI", fiCandidate),
+      parent_area_codes: parentAreaCodes,
+      f_term_themes: fTermThemes,
+    };
+  });
+
+  return {
+    technical_concept: keyword.technical_interpretation,
+    ipc_cpc_area: ipcCpcArea,
+    fi_subdivisions: fiSubdivisions,
+  };
+}
+
+function isMissingFTermCatalogError(message: string): boolean {
+  return (
+    message.includes("schema cache") ||
+    message.includes("Could not find the function") ||
+    message.includes("does not exist")
+  );
+}
+
+interface FTermSearchResult {
+  candidates: ClassificationCandidate[];
+  catalogAvailable: boolean;
+}
+
+interface FTermThemeSearchResult {
+  candidates: FTermThemeCandidate[];
+  catalogAvailable: boolean;
+}
+
+async function searchFTermThemeCandidates(
+  adminClient: SupabaseClient,
+  searchTerms: string[],
+  verifiedFiCodes: string[],
+  contextTerms: string[],
+): Promise<FTermThemeSearchResult> {
+  if (verifiedFiCodes.length === 0) {
+    return { candidates: [], catalogAvailable: true };
+  }
+
+  const themesByCode = new Map<string, FTermThemeCandidate>();
+  const uniqueSearchTerms = Array.from(
+    new Set(searchTerms.map((term) => term.trim()).filter(Boolean)),
+  ).slice(0, 5);
+
+  for (const searchText of uniqueSearchTerms) {
+    const { data, error } = await adminClient.rpc("search_f_term_themes", {
+      search_text: searchText,
+      requested_fi_codes: verifiedFiCodes,
+      result_limit: CLASSIFICATION_SEARCH_LIMIT,
+    });
+
+    if (error) {
+      if (isMissingFTermCatalogError(error.message)) {
+        return { candidates: [], catalogAvailable: false };
+      }
+
+      throw new Error(`F-term theme search failed: ${error.message}`);
+    }
+
+    for (const rawTheme of data ?? []) {
+      const row = rawTheme as FTermThemeCandidate;
+      const theme: FTermThemeCandidate = {
+        ...row,
+        similarity_score: Number(row.similarity_score) || 0,
+        fi_scope: Array.isArray(row.fi_scope) ? row.fi_scope : [],
+      };
+      const previous = themesByCode.get(theme.theme_code);
+
+      if (!previous || theme.similarity_score > previous.similarity_score) {
+        themesByCode.set(theme.theme_code, theme);
+      }
+    }
+  }
+
+  const queryTokens = Array.from(
+    new Set(uniqueSearchTerms.flatMap(technicalTokens)),
+  );
+  const contextTokens = Array.from(
+    new Set(contextTerms.flatMap(technicalTokens)),
+  );
+
+  const candidates = Array.from(themesByCode.values())
+    .map((theme) => {
+      const title =
+        `${theme.title_en ?? ""} ${theme.title_ja ?? ""}`.toLowerCase();
+      const matchedTerms = uniqueSearchTerms.filter((term) => {
+        const tokens = technicalTokens(term);
+        return (
+          title.includes(term.toLowerCase()) ||
+          tokens.some((token) => title.includes(token))
+        );
+      });
+      const queryHits = queryTokens.filter((token) =>
+        title.includes(token),
+      ).length;
+      const contextHits = contextTokens.filter((token) =>
+        title.includes(token),
+      ).length;
+      const matchScore = Math.min(
+        1,
+        Math.min(0.48, theme.similarity_score) +
+          Math.min(0.24, queryHits * 0.06) +
+          Math.min(0.12, contextHits * 0.025) +
+          Math.min(0.12, matchedTerms.length * 0.04) +
+          0.12,
+      );
+
+      return { ...theme, matched_terms: matchedTerms, match_score: matchScore };
+    })
+    .filter((theme) => (theme.match_score ?? 0) >= 0.38)
+    .sort(
+      (a, b) =>
+        (b.match_score ?? 0) - (a.match_score ?? 0) ||
+        b.similarity_score - a.similarity_score ||
+        a.theme_code.localeCompare(b.theme_code),
+    )
+    .slice(0, CANDIDATES_PER_SYSTEM);
+
+  return { candidates, catalogAvailable: true };
+}
+
+async function searchFTermAspectCandidates(
+  adminClient: SupabaseClient,
+  searchTerms: string[],
+  verifiedFiCodes: string[],
+  selectedThemeCodes: string[],
+  contextTerms: string[],
+): Promise<FTermSearchResult> {
+  if (verifiedFiCodes.length === 0 || selectedThemeCodes.length === 0) {
+    return { candidates: [], catalogAvailable: true };
+  }
+
+  const candidatesByCode = new Map<string, ClassificationCandidate>();
+  const uniqueSearchTerms = Array.from(
+    new Set(searchTerms.map((term) => term.trim()).filter(Boolean)),
+  ).slice(0, 5);
+
+  for (const searchText of uniqueSearchTerms) {
+    const { data, error } = await adminClient.rpc("search_f_term_titles", {
+      search_text: searchText,
+      requested_fi_codes: verifiedFiCodes,
+      requested_theme_codes: selectedThemeCodes,
+      result_limit: CLASSIFICATION_SEARCH_LIMIT,
+    });
+
+    if (error) {
+      if (isMissingFTermCatalogError(error.message)) {
+        return { candidates: [], catalogAvailable: false };
+      }
+
+      throw new Error(`F-term candidate search failed: ${error.message}`);
+    }
+
+    for (const rawCandidate of data ?? []) {
+      const row = rawCandidate as ClassificationCandidate;
+      const candidate: ClassificationCandidate = {
+        ...row,
+        system: "F-term",
+        similarity_score: Number(row.similarity_score) || 0,
+      };
+      const normalizedCode = normalizeClassificationCode(candidate.code);
+      const previous = candidatesByCode.get(normalizedCode);
+
+      if (!previous || candidate.similarity_score > previous.similarity_score) {
+        candidatesByCode.set(normalizedCode, candidate);
+      }
+    }
+  }
+
+  const normalizedFiCodes = verifiedFiCodes.map(normalizeClassificationCode);
+
+  const candidates = Array.from(candidatesByCode.values())
+    .map((candidate) => {
+      const scopeMatches = (candidate.fi_scope ?? []).some((scopeCode) => {
+        const normalizedScope = normalizeClassificationCode(scopeCode);
+        return normalizedFiCodes.some(
+          (fiCode) =>
+            fiCode.startsWith(normalizedScope) ||
+            normalizedScope.startsWith(fiCode),
+        );
+      });
+      const matchedTerms = uniqueSearchTerms.filter((term) => {
+        const title = candidateTitle(candidate);
+        const tokens = technicalTokens(term);
+        return (
+          title.includes(term.toLowerCase()) ||
+          (tokens.length > 0 && tokens.some((token) => title.includes(token)))
+        );
+      });
+      const semanticScore = calculateCandidateMatchScore(
+        candidate,
+        uniqueSearchTerms,
+        contextTerms,
+        [],
+      );
+
+      return {
+        ...candidate,
+        matched_terms: matchedTerms,
+        match_score: Math.min(
+          1,
+          semanticScore +
+            (scopeMatches ? 0.2 : 0) +
+            Math.min(0.12, matchedTerms.length * 0.04),
+        ),
+      };
+    })
+    .filter((candidate) => (candidate.match_score ?? 0) >= 0.42)
+    .sort(
+      (a, b) =>
+        (b.match_score ?? 0) - (a.match_score ?? 0) ||
+        b.similarity_score - a.similarity_score ||
+        a.code.localeCompare(b.code),
+    )
+    .slice(0, CANDIDATES_PER_SYSTEM);
+
+  return { candidates, catalogAvailable: true };
+}
+
+async function lookupAndRankClassifications(
   adminClient: SupabaseClient,
   result: AnalysisResult,
 ): Promise<AnalysisResult> {
   let warning = result.warning;
+  const modelCodeHints = result.keywords.map((keyword) => ({
+    ipc: [...keyword.ipc],
+    cpc: [...keyword.cpc],
+  }));
 
-  const allCodesBySystem: Record<
-    ClassificationSystem,
-    string[]
-  > = {
-    IPC: result.keywords.flatMap(
-      (keyword) => keyword.ipc,
-    ),
-    CPC: result.keywords.flatMap(
-      (keyword) => keyword.cpc,
-    ),
-    FI: result.keywords.flatMap(
-      (keyword) => keyword.fi,
-    ),
-  };
-
-  const catalogResults = await Promise.all(
-    (
-      ['IPC', 'CPC', 'FI'] as ClassificationSystem[]
-    ).map(async (system) => ({
-      system,
-      rows: await loadCatalogRowsForCodes(
-        adminClient,
-        system,
-        allCodesBySystem[system],
-      ),
-    })),
-  );
-
-  const catalogMaps = Object.fromEntries(
-    catalogResults.map(({ system, rows }) => [
-      system,
-      rows,
-    ]),
-  ) as Record<
-    ClassificationSystem,
-    Map<string, ClassificationCandidate>
-  >;
-
-  const enrichedKeywords: KeywordClassification[] =
-    result.keywords.map((keyword) => ({
+  const enrichedKeywords: KeywordClassification[] = result.keywords.map(
+    (keyword) => ({
       ...keyword,
-      ipc_evidence: buildCodeEvidence(
-        keyword.ipc,
-        catalogMaps.IPC,
-      ),
-      cpc_evidence: buildCodeEvidence(
-        keyword.cpc,
-        catalogMaps.CPC,
-      ),
-      fi_evidence: buildCodeEvidence(
-        keyword.fi,
-        catalogMaps.FI,
-      ),
-      f_term_evidence: buildAiSuggestedEvidence(
-        keyword.f_term,
-      ),
+      // Every route step is replaced by a technically scored catalog result.
+      // Model-proposed codes are search hints only and are never displayed.
+      ipc: [],
+      cpc: [],
+      fi: [],
+      f_term: [],
+      ipc_evidence: [],
+      cpc_evidence: [],
+      fi_evidence: [],
+      f_term_evidence: [],
       ipc_candidates: [],
       cpc_candidates: [],
       fi_candidates: [],
-    }));
+      f_term_candidates: [],
+      classification_route: {
+        technical_concept: keyword.technical_interpretation,
+        ipc_cpc_area: [],
+        fi_subdivisions: [],
+      },
+    }),
+  );
+
+  let fTermCatalogAvailable = true;
 
   const contextTerms = enrichedKeywords
     .slice(0, CANDIDATE_KEYWORD_LIMIT)
-    .map(
-      (keyword) =>
-        keyword.normalized_term || keyword.term,
-    )
+    .map((keyword) => keyword.normalized_term || keyword.term)
     .filter(Boolean);
 
   const candidateKeywordCount = Math.min(
@@ -707,73 +1463,193 @@ async function enrichAnalysisClassifications(
 
     const keywordResults = await Promise.all(
       keywordIndexes.map(async (keywordIndex) => {
-        const keyword =
-          enrichedKeywords[keywordIndex];
+        const keyword = enrichedKeywords[keywordIndex];
 
-        const searchTerms = [
-          keyword.normalized_term,
-          keyword.term,
-        ];
+        const { searchTerms, rankingTerms } =
+          buildClassificationLookupContext(keyword, contextTerms);
 
-        const [
-          ipcCandidates,
-          cpcCandidates,
-          fiCandidates,
-        ] = await Promise.all([
+        const modelHints = modelCodeHints[keywordIndex];
+        const [ipcCandidates, cpcCandidates] = await Promise.all([
           searchClassificationCandidates(
             adminClient,
             searchTerms,
-            'IPC',
-            contextTerms,
-            keyword.ipc,
+            "IPC",
+            rankingTerms,
+            modelHints.ipc,
           ),
           searchClassificationCandidates(
             adminClient,
             searchTerms,
-            'CPC',
-            contextTerms,
-            keyword.cpc,
-          ),
-          searchClassificationCandidates(
-            adminClient,
-            searchTerms,
-            'FI',
-            contextTerms,
-            keyword.fi,
+            "CPC",
+            rankingTerms,
+            modelHints.cpc,
           ),
         ]);
+
+        const selectedIpcCandidates = selectCandidates(
+          ipcCandidates,
+          AREA_SELECTION_THRESHOLD,
+          MAX_SELECTED_AREAS_PER_SYSTEM,
+        );
+        const selectedCpcCandidates = selectCandidates(
+          cpcCandidates,
+          AREA_SELECTION_THRESHOLD,
+          MAX_SELECTED_AREAS_PER_SYSTEM,
+        );
+        const selectedAreas = [
+          ...selectedIpcCandidates,
+          ...selectedCpcCandidates,
+        ];
+
+        const rawFiCandidates =
+          selectedAreas.length > 0
+            ? await searchClassificationCandidates(
+                adminClient,
+                searchTerms,
+                "FI",
+                rankingTerms,
+                selectedAreas.map((candidate) => candidate.code),
+              )
+            : [];
+        const fiCandidates = rawFiCandidates
+          .map((candidate) => ({
+            ...candidate,
+            source_area_codes: candidateAreaCodes(candidate, selectedAreas),
+          }))
+          .filter((candidate) => candidate.source_area_codes.length > 0);
+
+        const selectedFiCandidates = selectCandidates(
+          fiCandidates,
+          FI_SELECTION_THRESHOLD,
+          MAX_SELECTED_FI,
+        );
+        const verifiedFiCodes = selectedFiCandidates.map(
+          (candidate) => candidate.code,
+        );
+        const fTermThemeSearch = await searchFTermThemeCandidates(
+          adminClient,
+          searchTerms,
+          verifiedFiCodes,
+          rankingTerms,
+        );
+        const selectedFTermThemes = fTermThemeSearch.candidates
+          .filter(
+            (theme) =>
+              (theme.match_score ?? 0) >= F_TERM_THEME_SELECTION_THRESHOLD,
+          )
+          .slice(0, MAX_SELECTED_F_TERM_THEMES);
+        const fTermSearch = await searchFTermAspectCandidates(
+          adminClient,
+          searchTerms,
+          verifiedFiCodes,
+          selectedFTermThemes.map((theme) => theme.theme_code),
+          rankingTerms,
+        );
+        const selectedFTermCandidates = selectCandidates(
+          fTermSearch.candidates,
+          F_TERM_SELECTION_THRESHOLD,
+          MAX_SELECTED_F_TERMS,
+        );
 
         return {
           keywordIndex,
           ipcCandidates,
           cpcCandidates,
+          selectedIpcCandidates,
+          selectedCpcCandidates,
+          selectedAreas,
           fiCandidates,
+          selectedFiCandidates,
+          fTermThemeCandidates: fTermThemeSearch.candidates,
+          selectedFTermThemes,
+          fTermCandidates: fTermSearch.candidates,
+          selectedFTermCandidates,
+          fTermCatalogAvailable:
+            fTermThemeSearch.catalogAvailable && fTermSearch.catalogAvailable,
         };
       }),
     );
 
     for (const keywordResult of keywordResults) {
-      const keyword =
-        enrichedKeywords[keywordResult.keywordIndex];
+      const keyword = enrichedKeywords[keywordResult.keywordIndex];
 
-      keyword.ipc_candidates =
-        keywordResult.ipcCandidates;
+      keyword.ipc_candidates = keywordResult.ipcCandidates;
 
-      keyword.cpc_candidates =
-        keywordResult.cpcCandidates;
+      keyword.cpc_candidates = keywordResult.cpcCandidates;
 
-      keyword.fi_candidates =
-        keywordResult.fiCandidates;
+      keyword.ipc = keywordResult.selectedIpcCandidates.map(
+        (candidate) => candidate.code,
+      );
+      keyword.ipc_evidence = evidenceFromCandidates(
+        keywordResult.selectedIpcCandidates,
+      );
+      keyword.cpc = keywordResult.selectedCpcCandidates.map(
+        (candidate) => candidate.code,
+      );
+      keyword.cpc_evidence = evidenceFromCandidates(
+        keywordResult.selectedCpcCandidates,
+      );
+
+      keyword.fi_candidates = keywordResult.fiCandidates;
+      keyword.fi = keywordResult.selectedFiCandidates.map(
+        (candidate) => candidate.code,
+      );
+      keyword.fi_evidence = evidenceFromCandidates(
+        keywordResult.selectedFiCandidates,
+      );
+      keyword.f_term_candidates = keywordResult.fTermCandidates;
+      keyword.f_term = keywordResult.selectedFTermCandidates.map(
+        (candidate) => candidate.code,
+      );
+      keyword.f_term_evidence = evidenceFromCandidates(
+        keywordResult.selectedFTermCandidates,
+      );
+      keyword.classification_route = buildClassificationRoute(
+        keyword,
+        keywordResult.selectedAreas,
+        keywordResult.selectedFiCandidates,
+        keywordResult.selectedFTermCandidates,
+        keywordResult.selectedFTermThemes,
+      );
+
+      if (!keywordResult.fTermCatalogAvailable) {
+        fTermCatalogAvailable = false;
+      }
     }
   }
 
-  if (
-    enrichedKeywords.length >
-    CANDIDATE_KEYWORD_LIMIT
-  ) {
+  if (enrichedKeywords.length > CANDIDATE_KEYWORD_LIMIT) {
     warning = appendWarning(
       warning,
       `Database candidate retrieval was limited to the top ${CANDIDATE_KEYWORD_LIMIT} keywords to control response time.`,
+    );
+  }
+
+  for (const keyword of enrichedKeywords) {
+    const catalogBackedCount = [
+      ...(keyword.ipc_evidence ?? []),
+      ...(keyword.cpc_evidence ?? []),
+      ...(keyword.fi_evidence ?? []),
+      ...(keyword.f_term_evidence ?? []),
+    ].filter((item) => item.status === "database_verified").length;
+
+    keyword.classification_confidence =
+      keyword.fi.length > 0 && keyword.f_term.length > 0
+        ? "high"
+        : catalogBackedCount > 0
+          ? "medium"
+          : "low";
+  }
+
+  warning = appendWarning(
+    warning,
+    "The displayed route is enforced as technical concept → catalog-backed IPC/CPC area → linked FI subdivision → FI-scoped F-term theme/aspect. It is search guidance, not an official classification determination; confirm the current hierarchy and scope in J-PlatPat before relying on it.",
+  );
+
+  if (!fTermCatalogAvailable) {
+    warning = appendWarning(
+      warning,
+      "The authoritative F-term catalog has not been installed. F-term output was withheld rather than generated by AI.",
     );
   }
 
@@ -791,17 +1667,17 @@ async function analyzePatentText(
   const client = new OpenAI({ apiKey });
   const warning =
     text.length > LONG_INPUT_WARNING_CHARS
-      ? 'Long input detected. The model analyzed the provided text in one pass; splitting a long document can improve recall and cost control.'
+      ? "Long input detected. The model analyzed the provided text in one pass; splitting a long document can improve recall and cost control."
       : undefined;
 
   const response = await client.responses.create({
     model: MODEL,
     input: [
       {
-        role: 'system',
+        role: "system",
         content: [
           {
-            type: 'input_text',
+            type: "input_text",
             text: `You are a multilingual patent analyst for English and Japanese technical documents.
 Return only structured JSON matching the schema.
 Tasks:
@@ -809,24 +1685,27 @@ Tasks:
 - Extract meaningful technical patent keywords and noun phrases; exclude stopwords, legal boilerplate, and generic verbs.
 - Normalize synonyms into a concise canonical normalized_term.
 - For Japanese input, preserve Japanese wording in term and use an English technical phrase in normalized_term whenever possible.
+- For every keyword, create a technical_interpretation that separates: the technical object; its function; structure or operating mechanism; material, energy, or signal handled; purpose or technical effect; neighboring context terms; and 2-6 concise search phrases.
+- Interpret each keyword in the context of the claimed combination, not as an isolated dictionary term. Preserve limiting relationships such as "mounted on", "responsive to", "between", "wirelessly coupled", and relevant numerical or material constraints in the search phrases.
 - Count occurrences across direct terms and clear synonyms; rank by descending frequency.
-- Suggest likely IPC, CPC, FI, and F-term codes only when supportable.
+- Suggest IPC and CPC only when supportable; these suggestions are used as retrieval anchors.
+- Always return empty fi and f_term arrays. The server derives FI and F-term only from technically scored database records after your response.
 - Include a concise, specific reason grounded in the input text.
 - Use low confidence when classification support is weak.
 - Do not claim that any code is database verified. The server performs database verification after your response.
-- Do not invent overly specific FI or F-term codes. Leave arrays empty when a code cannot be responsibly inferred.`,
+- Do not invent FI, F-term, IPC, or CPC codes.`,
           },
         ],
       },
       {
-        role: 'user',
+        role: "user",
         content: [
           {
-            type: 'input_text',
+            type: "input_text",
             text: `Analyze this patent text. UTF-8 Japanese content may be present.
 
 Selected keywords that must receive particular consideration:
-${selectedKeywords.join(', ')}
+${selectedKeywords.join(", ")}
 
 Patent text:
 ${text}`,
@@ -836,8 +1715,8 @@ ${text}`,
     ],
     text: {
       format: {
-        type: 'json_schema',
-        name: 'patent_keyword_classification_analysis',
+        type: "json_schema",
+        name: "patent_keyword_classification_analysis",
         schema: responseSchema,
         strict: true,
       },
@@ -847,32 +1726,29 @@ ${text}`,
   const outputText = response.output_text;
 
   if (!outputText) {
-    throw new Error('OpenAI returned an empty response.');
+    throw new Error("OpenAI returned an empty response.");
   }
 
-  return normalizeResult(
-    JSON.parse(outputText) as AnalysisResult,
-    warning,
-  );
+  return normalizeResult(JSON.parse(outputText) as AnalysisResult, warning);
 }
 
 Deno.serve(async (request: Request) => {
-  if (request.method === 'OPTIONS') {
-    return new Response('ok', {
+  if (request.method === "OPTIONS") {
+    return new Response("ok", {
       status: 200,
       headers: corsHeaders,
     });
   }
 
-  if (request.method !== 'POST') {
+  if (request.method !== "POST") {
     return jsonResponse(
-      { error: 'Method not allowed. Use POST.' },
+      { error: "Method not allowed. Use POST." },
       { status: 405 },
     );
   }
 
   const analysisStartedAt = Date.now();
-  let auditStage = 'configuration';
+  let auditStage = "configuration";
   let auditUserId: string | undefined;
   let auditRequestId: string | undefined;
   let auditInputHash: string | undefined;
@@ -880,25 +1756,23 @@ Deno.serve(async (request: Request) => {
   let auditSelectedKeywordCount: number | undefined;
 
   try {
-    const apiKey = getRequiredEnv('OPENAI_API_KEY');
-    const supabaseUrl = getRequiredEnv('SUPABASE_URL');
-    const supabaseAnonKey = getRequiredEnv('SUPABASE_ANON_KEY');
-    const supabaseServiceRoleKey = getRequiredEnv(
-      'SUPABASE_SERVICE_ROLE_KEY',
-    );
+    const apiKey = getRequiredEnv("OPENAI_API_KEY");
+    const supabaseUrl = getRequiredEnv("SUPABASE_URL");
+    const supabaseAnonKey = getRequiredEnv("SUPABASE_ANON_KEY");
+    const supabaseServiceRoleKey = getRequiredEnv("SUPABASE_SERVICE_ROLE_KEY");
 
-    const authHeader = request.headers.get('Authorization');
+    const authHeader = request.headers.get("Authorization");
 
     if (!authHeader) {
-      logAnalysisAudit('rejected', {
-        stage: 'authentication',
+      logAnalysisAudit("rejected", {
+        stage: "authentication",
         status_code: 401,
-        error_message: 'Authorization header was not provided.',
+        error_message: "Authorization header was not provided.",
         duration_ms: Date.now() - analysisStartedAt,
       });
 
       return jsonResponse(
-        { error: 'Authentication required.' },
+        { error: "Authentication required." },
         { status: 401 },
       );
     }
@@ -921,60 +1795,54 @@ Deno.serve(async (request: Request) => {
     } = await authClient.auth.getUser();
 
     if (userError || !user) {
-      logAnalysisAudit('rejected', {
-        stage: 'authentication',
+      logAnalysisAudit("rejected", {
+        stage: "authentication",
         status_code: 401,
-        error_message: userError?.message ?? 'Authenticated user was not found.',
+        error_message:
+          userError?.message ?? "Authenticated user was not found.",
         duration_ms: Date.now() - analysisStartedAt,
       });
 
       return jsonResponse(
-        { error: 'Authentication required.' },
+        { error: "Authentication required." },
         { status: 401 },
       );
     }
 
     auditUserId = user.id;
-    auditStage = 'credit_check';
+    auditStage = "credit_check";
 
-    const adminClient = createClient(
-      supabaseUrl,
-      supabaseServiceRoleKey,
-      {
-        auth: {
-          persistSession: false,
-          autoRefreshToken: false,
-        },
+    const adminClient = createClient(supabaseUrl, supabaseServiceRoleKey, {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
       },
-    );
+    });
 
     const { data: creditRow, error: creditError } = await adminClient
-      .from('user_credit_balances')
-      .select('remaining_credits')
-      .eq('user_id', user.id)
+      .from("user_credit_balances")
+      .select("remaining_credits")
+      .eq("user_id", user.id)
       .maybeSingle();
 
     if (creditError) {
-      logAnalysisAudit('failed', {
-        stage: auditStage,
-        user_id: auditUserId,
-        status_code: 500,
-        error_message: creditError.message,
-        duration_ms: Date.now() - analysisStartedAt,
-      });
+      console.error("Credit availability check failed:", creditError);
 
-      return jsonResponse({ error: creditError.message }, { status: 500 });
+      throw new HttpError(
+        503,
+        "Credit database is temporarily unavailable. No credit was consumed.",
+      );
     }
 
     const currentCredits = Number(creditRow?.remaining_credits ?? 0);
 
     if (!Number.isFinite(currentCredits) || currentCredits <= 0) {
-      logAnalysisAudit('rejected', {
+      logAnalysisAudit("rejected", {
         stage: auditStage,
         user_id: auditUserId,
         remaining_credits: 0,
         status_code: 402,
-        error_message: 'No analysis credits are available.',
+        error_message: "No analysis credits are available.",
         duration_ms: Date.now() - analysisStartedAt,
       });
 
@@ -987,13 +1855,11 @@ Deno.serve(async (request: Request) => {
       );
     }
 
-    auditStage = 'request_validation';
+    auditStage = "request_validation";
     const body = (await request.json()) as AnalyzeRequest;
     const text = validateText(body);
     const requestId = validateRequestId(body.request_id);
-    const selectedKeywords = validateSelectedKeywords(
-      body.selected_keywords,
-    );
+    const selectedKeywords = validateSelectedKeywords(body.selected_keywords);
     const inputHash = await sha256Hex(
       JSON.stringify({
         text,
@@ -1006,8 +1872,8 @@ Deno.serve(async (request: Request) => {
     auditInputCharacters = text.length;
     auditSelectedKeywordCount = selectedKeywords.length;
 
-    logAnalysisAudit('started', {
-      stage: 'request_accepted',
+    logAnalysisAudit("started", {
+      stage: "request_accepted",
       user_id: auditUserId,
       request_id: auditRequestId,
       input_hash: auditInputHash,
@@ -1015,117 +1881,113 @@ Deno.serve(async (request: Request) => {
       selected_keyword_count: auditSelectedKeywordCount,
     });
 
-    auditStage = 'openai_analysis';
-    const aiResult = await analyzePatentText(
-      text,
-      apiKey,
-      selectedKeywords,
+    auditStage = "database_capability_check";
+    await confirmRequiredDatabaseFunctions(
+      supabaseUrl,
+      supabaseServiceRoleKey,
     );
+    logAnalysisAudit("ready", {
+      stage: "database_capabilities_confirmed",
+      user_id: auditUserId,
+      request_id: auditRequestId,
+      duration_ms: Date.now() - analysisStartedAt,
+    });
+
+    auditStage = "openai_analysis";
+    const aiResult = await analyzePatentText(text, apiKey, selectedKeywords);
     let result: AnalysisResult;
 
     try {
-      auditStage = 'classification_enrichment';
-      result = await enrichAnalysisClassifications(
-        adminClient,
-        aiResult,
-      );
+      auditStage = "classification_lookup";
+      result = await lookupAndRankClassifications(adminClient, aiResult);
     } catch (classificationError) {
-      console.error(
-        'Classification enrichment failed:',
-        classificationError,
-      );
+      console.error("Classification lookup failed:", classificationError);
 
       throw new HttpError(
         503,
-        'Classification database verification is temporarily unavailable. No credit was consumed.',
+        "Classification database verification is temporarily unavailable. No credit was consumed.",
       );
     }
 
-    auditStage = 'credit_consumption';
-    const { data: consumed, error: consumeError } =
-      await adminClient.rpc(
-        'consume_analysis_credit_once',
-        {
-          p_user_id: user.id,
-          p_source: 'analysis',
-          p_request_id: requestId,
-          p_input_hash: inputHash,
-        },
-      );
+    auditStage = "pre_charge_validation";
+    validateAnalysisReadyForCharge(result);
 
-    if (consumeError) {
-      logAnalysisAudit('failed', {
-        stage: auditStage,
-        user_id: auditUserId,
-        request_id: auditRequestId,
-        input_hash: auditInputHash,
-        input_characters: auditInputCharacters,
-        selected_keyword_count: auditSelectedKeywordCount,
-        status_code: 500,
-        error_message: consumeError.message,
-        duration_ms: Date.now() - analysisStartedAt,
+    const preparedResponse = {
+      ...result,
+      requestId,
+    };
+
+    JSON.stringify(preparedResponse);
+
+    logAnalysisAudit("ready", {
+      stage: "ready_for_charge",
+      user_id: auditUserId,
+      request_id: auditRequestId,
+      input_hash: auditInputHash,
+      input_characters: auditInputCharacters,
+      selected_keyword_count: auditSelectedKeywordCount,
+      result_keyword_count: result.keywords.length,
+      duration_ms: Date.now() - analysisStartedAt,
+    });
+
+    auditStage = "credit_consumption";
+    const { data: consumptionData, error: consumeError } =
+      await adminClient.rpc("consume_analysis_credit_once_v2", {
+        p_user_id: user.id,
+        p_source: "analysis",
+        p_request_id: requestId,
+        p_input_hash: inputHash,
       });
 
-      return jsonResponse({ error: consumeError.message }, { status: 500 });
+    if (consumeError) {
+      console.error("Atomic credit finalization failed:", consumeError);
+
+      if (
+        consumeError.message.includes(
+          "request_id was previously used with different input",
+        )
+      ) {
+        throw new HttpError(
+          409,
+          "request_id was previously used with different input.",
+        );
+      }
+
+      throw new HttpError(
+        503,
+        "Credit finalization is temporarily unavailable. Retry the same request; idempotency prevents a duplicate charge.",
+      );
     }
 
-    if (!consumed) {
-      logAnalysisAudit('rejected', {
+    const consumption = parseCreditConsumptionResult(consumptionData);
+
+    if (!consumption.consumed) {
+      logAnalysisAudit("rejected", {
         stage: auditStage,
         user_id: auditUserId,
         request_id: auditRequestId,
         input_hash: auditInputHash,
         input_characters: auditInputCharacters,
         selected_keyword_count: auditSelectedKeywordCount,
-        remaining_credits: 0,
+        remaining_credits: consumption.remaining_credits,
         status_code: 402,
-        error_message: 'Credit consumption was rejected.',
+        error_message: "Credit consumption was rejected.",
         duration_ms: Date.now() - analysisStartedAt,
       });
 
       return jsonResponse(
         {
           error: NO_CREDITS_MESSAGE,
-          remainingCredits: 0,
+          remainingCredits: consumption.remaining_credits,
         },
         { status: 402 },
       );
     }
 
-    const {
-      data: updatedCreditRow,
-      error: updatedCreditError,
-    } = await adminClient
-      .from('user_credit_balances')
-      .select('remaining_credits')
-      .eq('user_id', user.id)
-      .maybeSingle();
+    const remainingCredits = consumption.remaining_credits;
 
-    if (updatedCreditError) {
-      logAnalysisAudit('failed', {
-        stage: 'credit_readback',
-        user_id: auditUserId,
-        request_id: auditRequestId,
-        input_hash: auditInputHash,
-        input_characters: auditInputCharacters,
-        selected_keyword_count: auditSelectedKeywordCount,
-        status_code: 500,
-        error_message: updatedCreditError.message,
-        duration_ms: Date.now() - analysisStartedAt,
-      });
-
-      return jsonResponse(
-        { error: updatedCreditError.message },
-        { status: 500 },
-      );
-    }
-
-    const remainingCredits = Number(
-      updatedCreditRow?.remaining_credits ?? 0,
-    );
-
-    logAnalysisAudit('succeeded', {
-      stage: 'completed',
+    logAnalysisAudit("succeeded", {
+      stage: "completed",
       user_id: auditUserId,
       request_id: auditRequestId,
       input_hash: auditInputHash,
@@ -1135,32 +1997,30 @@ Deno.serve(async (request: Request) => {
       remaining_credits: Number.isFinite(remainingCredits)
         ? remainingCredits
         : 0,
+      replayed: consumption.replayed,
       status_code: 200,
       duration_ms: Date.now() - analysisStartedAt,
     });
 
     return jsonResponse({
-      ...result,
-      requestId,
+      ...preparedResponse,
       remainingCredits: Number.isFinite(remainingCredits)
         ? remainingCredits
         : 0,
     });
   } catch (error) {
-    console.error('Analyze Edge Function failed:', error);
+    console.error("Analyze Edge Function failed:", error);
 
     const message =
-      error instanceof Error
-        ? error.message
-        : 'Failed to analyze patent text.';
+      error instanceof Error ? error.message : "Failed to analyze patent text.";
     const status =
       error instanceof HttpError
         ? error.status
-        : message.includes('too long')
+        : message.includes("too long")
           ? 413
           : 500;
 
-    logAnalysisAudit('failed', {
+    logAnalysisAudit("failed", {
       stage: auditStage,
       user_id: auditUserId,
       request_id: auditRequestId,
@@ -1168,7 +2028,7 @@ Deno.serve(async (request: Request) => {
       input_characters: auditInputCharacters,
       selected_keyword_count: auditSelectedKeywordCount,
       status_code: status,
-      error_name: error instanceof Error ? error.name : 'UnknownError',
+      error_name: error instanceof Error ? error.name : "UnknownError",
       error_message: message,
       duration_ms: Date.now() - analysisStartedAt,
     });

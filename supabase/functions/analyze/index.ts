@@ -792,13 +792,14 @@ async function loadCatalogRowsForCodes(
   system: CatalogClassificationSystem,
   codes: string[],
 ): Promise<Map<string, ClassificationCandidate>> {
-  const normalizedCodes = Array.from(
-    new Set(codes.map(normalizeClassificationCode).filter(Boolean)),
-  );
+  // These values came directly from search_classification_titles. Recheck the
+  // exact stored code instead of assuming the importer's normalized_code
+  // format matches the Edge Function's normalization rule.
+  const catalogCodes = uniqueCodes(codes);
   const rowsByCode = new Map<string, ClassificationCandidate>();
 
-  for (let start = 0; start < normalizedCodes.length; start += 100) {
-    const codeBatch = normalizedCodes.slice(start, start + 100);
+  for (let start = 0; start < catalogCodes.length; start += 100) {
+    const codeBatch = catalogCodes.slice(start, start + 100);
 
     const { data, error } = await adminClient
       .from("classification_titles")
@@ -806,7 +807,7 @@ async function loadCatalogRowsForCodes(
         "system, code, normalized_code, title_en, title_ja, parent_code, hierarchy_level, edition",
       )
       .eq("system", system)
-      .in("normalized_code", codeBatch)
+      .in("code", codeBatch)
       .order("edition", { ascending: false });
 
     if (error) {
@@ -815,8 +816,7 @@ async function loadCatalogRowsForCodes(
 
     for (const rawRow of data ?? []) {
       const row = rawRow as Omit<ClassificationCandidate, "similarity_score">;
-      const normalizedCode =
-        row.normalized_code || normalizeClassificationCode(row.code);
+      const normalizedCode = normalizeClassificationCode(row.code);
 
       if (!rowsByCode.has(normalizedCode)) {
         rowsByCode.set(normalizedCode, {

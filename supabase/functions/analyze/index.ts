@@ -612,6 +612,12 @@ function normalizeClassificationCode(code: string): string {
   return code.toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
+function normalizeCatalogLookupCode(code: string): string {
+  // classification_titles.normalized_code removes spacing but preserves the
+  // subgroup slash (for example, "A61L 103/85" -> "A61L103/85").
+  return code.toUpperCase().replace(/[^A-Z0-9/]/g, "");
+}
+
 function uniqueCodes(codes: unknown): string[] {
   if (!Array.isArray(codes)) {
     return [];
@@ -942,7 +948,7 @@ async function loadCatalogRowsForCodes(
   // is accepted unless a row with the same normalized code and system exists.
   const normalizedCatalogCodes = Array.from(
     new Set(
-      uniqueCodes(codes).map(normalizeClassificationCode).filter(Boolean),
+      uniqueCodes(codes).map(normalizeCatalogLookupCode).filter(Boolean),
     ),
   );
   const rowsByCode = new Map<string, ClassificationCandidate>();

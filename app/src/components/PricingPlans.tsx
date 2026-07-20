@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Session } from '@supabase/supabase-js';
+import {
+  BriefcaseBusiness,
+  CheckCircle2,
+  CreditCard,
+  FlaskConical,
+} from 'lucide-react';
 import { supabase } from '../supabaseClient';
 import { detectCurrency, detectLanguage, messages, type SupportedCurrency } from '../lib/locale';
 import { formatPlanPrice, getLocalizedPricing, PRICING_PLANS, type PlanId } from '../lib/pricing';
@@ -13,10 +19,6 @@ interface PricingPlansProps {
 
 function asErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : '';
-}
-
-function iconForPlan(planId: PlanId) {
-  return planId === 'test' ? '⚗️' : '💼';
 }
 
 export function PricingPlans({
@@ -184,12 +186,13 @@ export function PricingPlans({
           const creditLabel = plan.credits === 2 ? t.credits2 : t.credits10;
           const validLabel = plan.validityDays === 10 ? t.valid10 : t.valid30;
           const isLoading = loadingPlan === plan.id;
+          const PlanIcon = plan.id === 'test' ? FlaskConical : BriefcaseBusiness;
 
           return (
             <article key={plan.id} className={`pricing-card pricing-card-${plan.theme}`}>
               <div className="pricing-card-hero">
                 <span className="pricing-icon" aria-hidden="true">
-                  {iconForPlan(plan.id)}
+                  <PlanIcon strokeWidth={1.9} />
                 </span>
                 <div>
                   <p className="pricing-credit-count">
@@ -203,11 +206,11 @@ export function PricingPlans({
 
               <ul className="pricing-features">
                 <li>
-                  <span aria-hidden="true">✓</span>
+                  <CheckCircle2 className="pricing-feature-icon" aria-hidden="true" />
                   {creditLabel}
                 </li>
                 <li>
-                  <span aria-hidden="true">✓</span>
+                  <CheckCircle2 className="pricing-feature-icon" aria-hidden="true" />
                   {validLabel}
                 </li>
               </ul>
@@ -224,12 +227,26 @@ export function PricingPlans({
                 onClick={() => void handleCheckout(plan.id, plan.credits)}
                 aria-label={isLoading ? t.loading(plan.credits) : t.buy(plan.credits, price)}
               >
-                <span aria-hidden="true">🛒</span>
+                <CreditCard aria-hidden="true" strokeWidth={2.2} />
                 {isLoading ? t.loading(plan.credits) : t.buy(plan.credits, price)}
               </button>
             </article>
           );
         })}
+      </div>
+
+      <div className="pricing-reassurance" aria-label="Payment and credit information">
+        {[
+          'One-time payment',
+          'No subscription',
+          'Secure checkout',
+          'Credits activate after payment confirmation',
+        ].map((item) => (
+          <span key={item}>
+            <CheckCircle2 aria-hidden="true" />
+            {item}
+          </span>
+        ))}
       </div>
     </section>
   );

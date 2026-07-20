@@ -439,8 +439,12 @@ tr:last-child td {
   width: 92px;
   height: 92px;
   border-radius: 24px;
-  font-size: 3.9rem;
   background: rgba(255, 255, 255, 0.55);
+}
+
+.pricing-icon svg {
+  width: 52px;
+  height: 52px;
 }
 
 .pricing-credit-count {
@@ -482,15 +486,10 @@ tr:last-child td {
   gap: 16px;
 }
 
-.pricing-features span {
-  display: inline-grid;
-  place-items: center;
+.pricing-feature-icon {
   flex: 0 0 auto;
-  width: 28px;
-  height: 28px;
-  border-radius: 999px;
-  color: #fff;
-  font-weight: 900;
+  width: 26px;
+  height: 26px;
 }
 
 .pricing-price {
@@ -570,8 +569,10 @@ tr:last-child td {
   box-shadow: 0 10px 22px rgba(15, 23, 42, 0.2);
 }
 
-.pricing-buy-button span {
-  font-size: 1.7rem;
+.pricing-buy-button svg {
+  flex: 0 0 auto;
+  width: 25px;
+  height: 25px;
 }
 
 .pricing-card-blue {
@@ -583,7 +584,10 @@ tr:last-child td {
   color: #0f4aa7;
 }
 
-.pricing-card-blue .pricing-features span,
+.pricing-card-blue .pricing-feature-icon {
+  color: #0754c9;
+}
+
 .pricing-card-blue .pricing-buy-button {
   background: linear-gradient(135deg, #2563eb, #0754c9);
 }
@@ -601,7 +605,10 @@ tr:last-child td {
   color: #166534;
 }
 
-.pricing-card-green .pricing-features span,
+.pricing-card-green .pricing-feature-icon {
+  color: #16803c;
+}
+
 .pricing-card-green .pricing-buy-button {
   background: linear-gradient(135deg, #22c55e, #15803d);
 }
@@ -617,6 +624,36 @@ tr:last-child td {
 
 .pricing-buy-button:disabled {
   opacity: 0.78;
+}
+
+.pricing-reassurance {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px 24px;
+  margin: 22px auto 0;
+  padding: 14px 18px;
+  border: 1px solid #dbe4ee;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.88);
+  color: #334155;
+  font-size: 0.92rem;
+  font-weight: 700;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+}
+
+.pricing-reassurance span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.pricing-reassurance svg {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  color: #15803d;
 }
 
 @media (max-width: 820px) {
@@ -640,6 +677,12 @@ tr:last-child td {
   .pricing-buy-button {
     width: calc(100% - 44px);
     margin: 0 22px 24px;
+  }
+
+  .pricing-reassurance {
+    align-items: flex-start;
+    flex-direction: column;
+    padding: 16px 18px;
   }
 }
 

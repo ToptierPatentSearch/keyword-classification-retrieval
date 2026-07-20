@@ -1480,6 +1480,12 @@ select:focus-visible {
   font-size: 1.15rem;
 }
 
+.credit-stats .user-detail:first-child .user-detail-label {
+  overflow: visible;
+  line-height: 1.15;
+  white-space: normal;
+}
+
 .stat-icon {
   width: 30px;
   height: 30px;

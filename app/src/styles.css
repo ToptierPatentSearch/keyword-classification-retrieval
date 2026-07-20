@@ -1464,10 +1464,16 @@ select:focus-visible {
 }
 
 .credit-stats .user-detail strong {
-  overflow: hidden;
   font-size: 0.79rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.35;
+}
+
+/* Keep the full expiration date and time zone visible. */
+.credit-stats .user-detail:nth-child(2) strong {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
 }
 
 .credit-stats .user-detail:first-child strong {

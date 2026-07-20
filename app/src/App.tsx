@@ -11,6 +11,18 @@ import type {
   TechnicalInterpretation,
 } from "./types";
 import { PricingPlans } from "./components/PricingPlans";
+import {
+  ArrowRight,
+  Clock3,
+  Coins,
+  Eraser,
+  FileText,
+  LogOut,
+  Search,
+  Settings,
+  ShieldCheck,
+  Sparkles,
+} from "lucide-react";
 type PlanId = "test" | "business";
 const EXPECTED_ANALYSIS_SCHEMA_VERSION = "common-concept-v2";
 
@@ -1332,54 +1344,103 @@ export default function App() {
   }
 
   return (
-    <main className="shell">
-      <header className="hero">
-        <div className="hero-copy">
-          <p className="eyebrow">English / Japanese Patent Intelligence</p>
-          <h1>Keyword Extraction & Classification Analysis</h1>
-          {hasCredits && (
-            <div className="credit-summary" aria-label="Credit status">
-              <span className="user-detail">
-                <span className="user-detail-label">Remaining credits</span>
-                <strong>{remainingCredits}</strong>
-              </span>
-              {creditsExpireAt && (
-                <span className="user-detail">
-                  <span className="user-detail-label">Expiration date</span>
-                  <strong>{formatLocalExpirationDate(creditsExpireAt)}</strong>
-                </span>
-              )}
-            </div>
-          )}
-          <p className="muted">
-            Build a traceable classification route for each keyword: technical
-            concept → IPC/CPC area → FI subdivision → F-term theme/aspect.
-          </p>
+    <main className="shell app-shell">
+      <header className="app-header">
+        <div className="brand-lockup" aria-label="Top-tier Patent Search">
+          <span className="brand-mark" aria-hidden="true">
+            <Search />
+          </span>
+          <span className="brand-copy">
+            <strong>Top-tier Patent Search</strong>
+            <span>Classification Intelligence</span>
+          </span>
         </div>
         <div className="user-panel">
-          <span>{session.user.email}</span>
+          <span className="user-email" title={session.user.email}>
+            {session.user.email}
+          </span>
           <div className="user-panel-actions">
             {isAdmin && (
               <button
                 type="button"
-                className="secondary"
+                className="secondary compact-button"
                 onClick={() => {
                   window.location.hash = "#/admin/user-activity";
                 }}
               >
+                <Settings aria-hidden="true" />
                 Admin
               </button>
             )}
             <button
               type="button"
-              className="secondary"
+              className="secondary compact-button"
               onClick={handleSignOut}
             >
+              <LogOut aria-hidden="true" />
               Sign out
             </button>
           </div>
         </div>
       </header>
+
+      <section className="hero" aria-labelledby="analysis-title">
+        <div className="hero-copy">
+          <p className="eyebrow">
+            <Sparkles aria-hidden="true" />
+            English / Japanese Patent Intelligence
+          </p>
+          <h1 id="analysis-title">
+            Keyword Extraction &amp; <span>Classification Analysis</span>
+          </h1>
+          <p className="hero-lead">
+            Turn patent text into structured search intelligence with a
+            traceable, catalog-backed classification route.
+          </p>
+          <ol className="workflow-route" aria-label="Classification workflow">
+            <li>Technical concept</li>
+            <li>IPC/CPC area</li>
+            <li>FI subdivision</li>
+            <li>F-term theme/aspect</li>
+          </ol>
+        </div>
+        {hasCredits && (
+          <aside className="credit-summary" aria-label="Credit status">
+            <div className="credit-summary-heading">
+              <span className="credit-summary-icon" aria-hidden="true">
+                <ShieldCheck />
+              </span>
+              <span>
+                <strong>Analysis access</strong>
+                <small>Active and ready</small>
+              </span>
+              <span className="status-dot">Active</span>
+            </div>
+            <div className="credit-stats">
+              <span className="user-detail">
+                <span className="stat-icon" aria-hidden="true">
+                  <Coins />
+                </span>
+                <span>
+                  <span className="user-detail-label">Remaining credits</span>
+                  <strong>{remainingCredits}</strong>
+                </span>
+              </span>
+              {creditsExpireAt && (
+                <span className="user-detail">
+                  <span className="stat-icon" aria-hidden="true">
+                    <Clock3 />
+                  </span>
+                  <span>
+                    <span className="user-detail-label">Expiration date</span>
+                    <strong>{formatLocalExpirationDate(creditsExpireAt)}</strong>
+                  </span>
+                </span>
+              )}
+            </div>
+          </aside>
+        )}
+      </section>
       {showPurchaseCards && (
         <PricingPlans
           session={session}
@@ -1390,25 +1451,50 @@ export default function App() {
       )}
       {showInputCard && (
         <section className="card input-card">
-          <div className="section-heading">
-            <h2>Patent text</h2>
-            <span>{text.length.toLocaleString()} characters</span>
+          <div className="input-card-header">
+            <div className="section-title">
+              <span className="section-icon" aria-hidden="true">
+                <FileText />
+              </span>
+              <span>
+                <span className="section-kicker">Analysis input</span>
+                <h2>Patent text</h2>
+              </span>
+            </div>
+            <span className="character-count" aria-live="polite">
+              {text.length.toLocaleString()} characters
+            </span>
           </div>
+          <label className="sr-only" htmlFor="patent-analysis-text">
+            Patent claims, abstracts, or descriptions
+          </label>
           <textarea
+            id="patent-analysis-text"
             value={text}
             onChange={(event) => setText(event.target.value)}
             placeholder="Paste English or Japanese patent claims, abstracts, or descriptions…"
             spellCheck={false}
           />
-          <p className="estimate">{estimatedResultTime}</p>
-          <div className="actions">
+          <div className="input-meta">
+            <p className="estimate">
+              <Clock3 aria-hidden="true" />
+              {estimatedResultTime}
+            </p>
+            <p className="secure-processing">
+              <ShieldCheck aria-hidden="true" />
+              Secure authenticated processing
+            </p>
+          </div>
+          <div className="actions input-actions">
             <button
               className="primary"
               type="button"
               onClick={handleAnalyze}
               disabled={loading || !hasCredits}
             >
-              {loading ? "Analyzing…" : "Analyze"}
+              <Sparkles aria-hidden="true" />
+              {loading ? "Analyzing…" : "Analyze patent text"}
+              {!loading && <ArrowRight aria-hidden="true" />}
             </button>
             <button
               className="secondary"
@@ -1416,6 +1502,7 @@ export default function App() {
               onClick={handleClear}
               disabled={loading}
             >
+              <Eraser aria-hidden="true" />
               Clear
             </button>
           </div>
@@ -1460,30 +1547,11 @@ export default function App() {
             </button>
           </div>
           {result.warning && <p className="warning">{result.warning}</p>}
-          <section
-            style={{
-              width: "100%",
-              maxWidth: "54rem",
-              margin: "1rem auto 0",
-              padding: "1rem",
-              border: "1px solid #93c5fd",
-              borderRadius: "1rem",
-              background: "#eff6ff",
-              display: "grid",
-              gap: "0.6rem",
-            }}
-          >
-            <div
-              style={{
-                color: "#1e40af",
-                fontSize: "0.76rem",
-                fontWeight: 900,
-                letterSpacing: "0.04em",
-              }}
-            >
+          <section className="common-concept-card">
+            <div className="common-concept-label">
               AI-DERIVED COMMON TECHNICAL CONCEPT
             </div>
-            <p style={{ margin: 0, color: "#475569", fontSize: "0.8rem" }}>
+            <p className="common-concept-note">
               This complete-input concept is shared by all retrieved keywords.
             </p>
             <TechnicalInterpretationCell
@@ -1492,7 +1560,7 @@ export default function App() {
           </section>
           <div
             aria-label="Keyword analysis results in portrait layout"
-            style={{ display: "grid", gap: "1rem", marginTop: "1rem" }}
+            className="keyword-results-list"
           >
             {sortedKeywords.map((keyword) => (
               <KeywordResultCard

@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 type PlanId = "test" | "business";
 const EXPECTED_ANALYSIS_SCHEMA_VERSION = "common-concept-v2";
+const MAX_INPUT_CHARACTERS = 10_000;
 
 function TechnicalInterpretationCell({
   interpretation,
@@ -1461,8 +1462,13 @@ export default function App() {
                 <h2>Patent text</h2>
               </span>
             </div>
-            <span className="character-count" aria-live="polite">
-              {text.length.toLocaleString()} characters
+            <span
+              className="character-count"
+              aria-label={`${text.length.toLocaleString()} of ${MAX_INPUT_CHARACTERS.toLocaleString()} characters used`}
+              aria-live="polite"
+            >
+              {text.length.toLocaleString()} /{" "}
+              {MAX_INPUT_CHARACTERS.toLocaleString()}
             </span>
           </div>
           <label className="sr-only" htmlFor="patent-analysis-text">
@@ -1472,6 +1478,7 @@ export default function App() {
             id="patent-analysis-text"
             value={text}
             onChange={(event) => setText(event.target.value)}
+            maxLength={MAX_INPUT_CHARACTERS}
             placeholder="Paste English or Japanese patent claims, abstracts, or descriptions…"
             spellCheck={false}
           />

@@ -1327,7 +1327,7 @@ select:focus-visible {
 .hero h1 {
   max-width: 820px;
   color: #0b1f3a;
-  font-size: clamp(2.65rem, 5.4vw, 5rem);
+  font-size: clamp(2.4rem, 4.9vw, 4.5rem);
   font-weight: 760;
   letter-spacing: -0.055em;
   line-height: 0.98;
@@ -1588,6 +1588,8 @@ select:focus-visible {
   color: #64748b;
   font-size: 0.75rem;
   font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .input-card textarea {
@@ -1767,7 +1769,7 @@ select:focus-visible {
   }
 
   .hero h1 {
-    font-size: clamp(2.45rem, 11vw, 4.3rem);
+    font-size: clamp(2.25rem, 10vw, 3.9rem);
   }
 
   .credit-summary {

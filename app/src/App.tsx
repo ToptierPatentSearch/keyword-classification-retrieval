@@ -1397,11 +1397,11 @@ export default function App() {
             Turn patent text into structured search intelligence with a
             traceable, catalog-backed classification route.
           </p>
-          <ol className="workflow-route" aria-label="Classification workflow">
+          <ol className="workflow-route" aria-label="Analysis workflow">
             <li>Technical concept</li>
-            <li>IPC/CPC area</li>
-            <li>FI subdivision</li>
-            <li>F-term theme/aspect</li>
+            <li>Classification intelligence</li>
+            <li>Precision refinement</li>
+            <li>Search-ready insights</li>
           </ol>
         </div>
         {hasCredits && (

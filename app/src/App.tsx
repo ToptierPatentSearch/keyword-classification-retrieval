@@ -396,8 +396,22 @@ function KeywordResultCard({ keyword }: { keyword: KeywordClassification }) {
           background: "#ecfdf5",
         }}
       >
-        <strong style={{ color: "#065f46" }}>
-          Why this keyword was selected
+        <strong style={{ color: "#065f46" }}>Why this keyword matters</strong>
+        <p
+          style={{
+            margin: 0,
+            padding: "0.65rem 0.75rem",
+            borderRadius: "0.65rem",
+            background: "#ffffff",
+            color: "#1f2937",
+            fontSize: "0.86rem",
+            lineHeight: 1.55,
+          }}
+        >
+          {keyword.reason}
+        </p>
+        <strong style={{ fontSize: "0.76rem", color: "#475569" }}>
+          Linked parts of the technical concept
         </strong>
         <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
           {conceptFacets.map((facet) => (
@@ -418,7 +432,7 @@ function KeywordResultCard({ keyword }: { keyword: KeywordClassification }) {
         </div>
         <div>
           <strong style={{ fontSize: "0.76rem", color: "#475569" }}>
-            Technical-concept basis
+            Most relevant concept links
           </strong>
           <ul style={{ margin: "0.3rem 0 0", paddingLeft: "1.25rem" }}>
             {conceptBasis.map((basis) => (
@@ -428,7 +442,7 @@ function KeywordResultCard({ keyword }: { keyword: KeywordClassification }) {
         </div>
         <div>
           <strong style={{ fontSize: "0.76rem", color: "#475569" }}>
-            Exact input evidence
+            Supporting wording from the input
           </strong>
           <div style={{ display: "grid", gap: "0.35rem", marginTop: "0.3rem" }}>
             {sourceEvidence.map((evidence) => (
@@ -447,9 +461,6 @@ function KeywordResultCard({ keyword }: { keyword: KeywordClassification }) {
               </blockquote>
             ))}
           </div>
-        </div>
-        <div style={{ fontSize: "0.82rem", lineHeight: 1.45 }}>
-          <strong>Selection rationale:</strong> {keyword.reason}
         </div>
       </section>
 
@@ -934,6 +945,7 @@ export default function App() {
   const [creditRefreshKey, setCreditRefreshKey] = useState(0);
   const [, setRemainingCreditsAfterAnalysis] = useState<number | null>(null);
   const [remainingCredits, setRemainingCredits] = useState<number | null>(null);
+  const [creditBalanceError, setCreditBalanceError] = useState(false);
   const [, setSelectedPlan] = useState<PlanId | null>(null);
   const [creditsExpireAt, setCreditsExpireAt] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -1023,6 +1035,7 @@ export default function App() {
       (nextPlan === "test" || nextPlan === "business")
     ) {
       setRemainingCredits(null);
+      setCreditBalanceError(false);
       setCreditRefreshKey((key) => key + 1);
       window.localStorage.removeItem("lastCheckoutPlan");
 
@@ -1042,6 +1055,7 @@ export default function App() {
     async function fetchCreditBalance() {
       if (!session) {
         setRemainingCredits(null);
+        setCreditBalanceError(false);
         setSelectedPlan(null);
         setCreditsExpireAt(null);
         return;
@@ -1059,7 +1073,8 @@ export default function App() {
 
       if (error) {
         console.error("Failed to fetch credit balance:", error);
-        setRemainingCredits(0);
+        setRemainingCredits(null);
+        setCreditBalanceError(true);
         setSelectedPlan(null);
         setCreditsExpireAt(null);
         return;
@@ -1067,6 +1082,7 @@ export default function App() {
 
       if (!data) {
         setRemainingCredits(0);
+        setCreditBalanceError(false);
         setSelectedPlan(null);
         setCreditsExpireAt(null);
         return;
@@ -1086,12 +1102,14 @@ export default function App() {
 
       if (remaining <= 0 || isExpired) {
         setRemainingCredits(0);
+        setCreditBalanceError(false);
         setSelectedPlan(null);
-        setCreditsExpireAt(null);
+        setCreditsExpireAt(expiresAt);
         return;
       }
 
       setRemainingCredits(remaining);
+      setCreditBalanceError(false);
       setSelectedPlan(planMode);
       setCreditsExpireAt(expiresAt);
     }
@@ -1264,8 +1282,8 @@ export default function App() {
           setResult(null);
           setRemainingCreditsAfterAnalysis(0);
           setRemainingCredits(0);
+          setCreditBalanceError(false);
           setSelectedPlan(null);
-          setCreditsExpireAt(null);
           return;
         }
 
@@ -1312,10 +1330,10 @@ export default function App() {
       clearPendingAnalysisRequest();
       setRemainingCreditsAfterAnalysis(data.remainingCredits);
       setRemainingCredits(data.remainingCredits);
+      setCreditBalanceError(false);
 
       if (data.remainingCredits <= 0) {
         setSelectedPlan(null);
-        setCreditsExpireAt(null);
       }
     } catch (analyzeError) {
       setError(asErrorMessage(analyzeError));
@@ -1356,6 +1374,7 @@ export default function App() {
     clearPendingAnalysisRequest();
     setResult(null);
     setRemainingCredits(null);
+    setCreditBalanceError(false);
     setSelectedPlan(null);
     setCreditsExpireAt(null);
   }
@@ -1506,44 +1525,68 @@ export default function App() {
             <li>Search-ready insights</li>
           </ol>
         </div>
-        {hasCredits && (
-          <aside className="credit-summary" aria-label="Credit status">
-            <div className="credit-summary-heading">
-              <span className="credit-summary-icon" aria-hidden="true">
-                <ShieldCheck />
+        <aside className="credit-summary" aria-label="Credit status">
+          <div className="credit-summary-heading">
+            <span className="credit-summary-icon" aria-hidden="true">
+              <ShieldCheck />
+            </span>
+            <span>
+              <strong>Analysis access</strong>
+              <small>
+                {creditBalanceError
+                  ? "Balance temporarily unavailable"
+                  : !creditsLoaded
+                    ? "Checking credit balance"
+                    : hasCredits
+                      ? "Active and ready"
+                      : "No active credits"}
+              </small>
+            </span>
+            <span className="status-dot">
+              {creditBalanceError
+                ? "Unavailable"
+                : !creditsLoaded
+                  ? "Loading"
+                  : hasCredits
+                    ? "Active"
+                    : "Empty"}
+            </span>
+          </div>
+          <div className="credit-stats">
+            <span className="user-detail">
+              <span className="stat-icon" aria-hidden="true">
+                <Coins />
               </span>
               <span>
-                <strong>Analysis access</strong>
-                <small>Active and ready</small>
+                <span className="user-detail-label">Remaining credits</span>
+                <strong>
+                  {creditBalanceError
+                    ? "Unavailable"
+                    : (remainingCredits ?? "Loading…")}
+                </strong>
               </span>
-              <span className="status-dot">Active</span>
-            </div>
-            <div className="credit-stats">
-              <span className="user-detail">
-                <span className="stat-icon" aria-hidden="true">
-                  <Coins />
-                </span>
-                <span>
-                  <span className="user-detail-label">Remaining credits</span>
-                  <strong>{remainingCredits}</strong>
-                </span>
+            </span>
+            <span className="user-detail">
+              <span className="stat-icon" aria-hidden="true">
+                <Clock3 />
               </span>
-              {creditsExpireAt && (
-                <span className="user-detail">
-                  <span className="stat-icon" aria-hidden="true">
-                    <Clock3 />
-                  </span>
-                  <span>
-                    <span className="user-detail-label">Expiration date</span>
-                    <strong>
-                      {formatLocalExpirationDate(creditsExpireAt)}
-                    </strong>
-                  </span>
+              <span>
+                <span className="user-detail-label">
+                  Credit expiration date
                 </span>
-              )}
-            </div>
-          </aside>
-        )}
+                <strong>
+                  {creditBalanceError
+                    ? "Unavailable"
+                    : creditsExpireAt
+                      ? formatLocalExpirationDate(creditsExpireAt)
+                      : creditsLoaded
+                        ? "Not set"
+                        : "Loading…"}
+                </strong>
+              </span>
+            </span>
+          </div>
+        </aside>
       </section>
       {showPurchaseCards && (
         <PricingPlans

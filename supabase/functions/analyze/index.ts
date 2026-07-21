@@ -320,8 +320,7 @@ const responseSchema = {
           concept_facets: {
             type: "array",
             minItems: 1,
-            maxItems: 4,
-            uniqueItems: true,
+            maxItems: 3,
             items: {
               type: "string",
               enum: TECHNICAL_CONCEPT_FACETS,
@@ -330,7 +329,7 @@ const responseSchema = {
           source_evidence: {
             type: "array",
             minItems: 1,
-            maxItems: 3,
+            maxItems: 2,
             items: { type: "string", minLength: 3, maxLength: 240 },
           },
           count: { type: "integer", minimum: 1 },
@@ -343,7 +342,7 @@ const responseSchema = {
             type: "string",
             enum: ["high", "medium", "low"],
           },
-          reason: { type: "string" },
+          reason: { type: "string", minLength: 40, maxLength: 600 },
         },
       },
     },
@@ -746,21 +745,6 @@ function normalizeTechnicalInterpretation(
   };
 }
 
-const FACET_LABELS: Record<TechnicalConceptFacet, string> = {
-  object_or_system: "object/system",
-  purpose_or_problem: "purpose or problem",
-  application_or_use: "application/use",
-  components: "components",
-  component_relationships: "component relationships",
-  material_or_composition: "material/composition",
-  manufacturing_or_processing_steps: "manufacturing or processing steps",
-  operation: "operation",
-  control_means: "control means",
-  controlled_variables: "controlled variables",
-  operating_conditions: "operating conditions",
-  technical_effect: "technical effect",
-};
-
 function normalizeComparableText(value: string): string {
   return value.normalize("NFKC").toLowerCase().replace(/\s+/gu, " ").trim();
 }
@@ -864,19 +848,74 @@ function hasMeaningfulTextOverlap(left: string, right: string): boolean {
   return Array.from(leftTokens).some((token) => rightTokens.has(token));
 }
 
-function buildSelectionReason(
-  keyword: string,
-  facets: TechnicalConceptFacet[],
-  conceptBasis: string[],
+function overlapScore(left: string, right: string): number {
+  const leftTokens = comparisonTokens(left);
+  const rightTokens = comparisonTokens(right);
+  let score = 0;
+
+  for (const token of leftTokens) {
+    if (rightTokens.has(token)) score += 1;
+  }
+
+  return score;
+}
+
+function selectRelevantConceptBasis(
+  candidates: string[],
+  term: string,
+  normalizedTerm: string,
+  synonyms: string[],
   sourceEvidence: string[],
-): string {
-  const facetText = facets.map((facet) => FACET_LABELS[facet]).join(", ");
-  const basisText = conceptBasis
+): string[] {
+  return candidates
+    .map((basis, index) => {
+      const containsKeyword = evidenceContainsKeyword(
+        basis,
+        term,
+        normalizedTerm,
+        synonyms,
+      );
+      const evidenceScore = Math.max(
+        0,
+        ...sourceEvidence.map((evidence) => overlapScore(basis, evidence)),
+      );
+
+      return {
+        basis,
+        index,
+        score: (containsKeyword ? 10 : 0) + Math.min(6, evidenceScore),
+      };
+    })
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index)
     .slice(0, 3)
-    .map((value) => `“${value}”`)
-    .join("; ");
-  const evidenceText = sourceEvidence[0];
-  return `Selected “${keyword}” because the input explicitly states “${evidenceText},” which supports the extracted technical concept's ${facetText} facet${facets.length === 1 ? "" : "s"}: ${basisText}.`;
+    .map((item) => item.basis);
+}
+
+function isMeaningfulSelectionReason(
+  reason: string,
+  term: string,
+  normalizedTerm: string,
+  synonyms: string[],
+  conceptBasis: string[],
+): boolean {
+  const normalizedReason = normalizeComparableText(reason);
+  if (normalizedReason.length < 40 || normalizedReason.length > 600) {
+    return false;
+  }
+
+  if (
+    /selected because|input (explicitly )?states|concept('?s)? facet|source evidence/iu.test(
+      normalizedReason,
+    )
+  ) {
+    return false;
+  }
+
+  return (
+    evidenceContainsKeyword(reason, term, normalizedTerm, synonyms) &&
+    conceptBasis.some((basis) => hasMeaningfulTextOverlap(reason, basis))
+  );
 }
 
 function normalizeResult(
@@ -916,17 +955,24 @@ function normalizeResult(
           !excludedSynonyms.has(synonym.normalize("NFKC").toLowerCase()),
       );
       const conceptFacets = normalizeConceptFacets(keyword.concept_facets);
-      const conceptBasis = conceptBasisForFacets(
+      const completeConceptBasis = conceptBasisForFacets(
         technicalConcept,
         conceptFacets,
       );
-      const sourceEvidence = cleanTextList(keyword.source_evidence, 3).filter(
+      const sourceEvidence = cleanTextList(keyword.source_evidence, 2).filter(
         (evidence) =>
           isGroundedExcerpt(evidence, sourceText) &&
           evidenceContainsKeyword(evidence, term, normalizedTerm, synonyms) &&
-          conceptBasis.some((basis) =>
+          completeConceptBasis.some((basis) =>
             hasMeaningfulTextOverlap(basis, evidence),
           ),
+      );
+      const conceptBasis = selectRelevantConceptBasis(
+        completeConceptBasis,
+        term,
+        normalizedTerm,
+        synonyms,
+        sourceEvidence,
       );
       const keywordRepresentedInConcept = conceptBasis.some((basis) =>
         evidenceContainsKeyword(basis, term, normalizedTerm, synonyms),
@@ -940,14 +986,18 @@ function normalizeResult(
             hasMeaningfulTextOverlap(basis, evidence),
           ),
         );
-      const reason = conceptLinked
-        ? buildSelectionReason(
-            term || normalizedTerm,
-            conceptFacets,
-            conceptBasis,
-            sourceEvidence,
-          )
-        : "";
+      const modelReason = String(keyword.reason ?? "").trim();
+      const reason =
+        conceptLinked &&
+        isMeaningfulSelectionReason(
+          modelReason,
+          term,
+          normalizedTerm,
+          synonyms,
+          conceptBasis,
+        )
+          ? modelReason
+          : "";
 
       return {
         term,
@@ -964,8 +1014,7 @@ function normalizeResult(
         fi: [],
         f_term: [],
         classification_confidence: confidence,
-        // The model's prose is not trusted. The server builds the rationale
-        // exclusively from the normalized common concept and grounded excerpts.
+        // Model prose is retained only after deterministic concept/evidence checks.
         reason,
         classification_reason: "Pending catalog retrieval.",
       };
@@ -1074,7 +1123,7 @@ function validateAnalysisReadyForCharge(
         keyword.synonyms.every((synonym) => Boolean(synonym.trim())) &&
         Array.isArray(keyword.concept_facets) &&
         keyword.concept_facets.length > 0 &&
-        keyword.concept_facets.length <= 4 &&
+        keyword.concept_facets.length <= 3 &&
         keyword.concept_facets.every((facet) =>
           TECHNICAL_CONCEPT_FACETS.includes(facet),
         ) &&
@@ -1082,9 +1131,15 @@ function validateAnalysisReadyForCharge(
         keyword.concept_basis.length > 0 &&
         sameNormalizedTextSet(
           keyword.concept_basis,
-          conceptBasisForFacets(
-            result.technical_concept,
-            keyword.concept_facets,
+          selectRelevantConceptBasis(
+            conceptBasisForFacets(
+              result.technical_concept,
+              keyword.concept_facets,
+            ),
+            keyword.term,
+            keyword.normalized_term,
+            keyword.synonyms,
+            keyword.source_evidence,
           ),
         ) &&
         keyword.concept_basis.some((basis) =>
@@ -1097,7 +1152,7 @@ function validateAnalysisReadyForCharge(
         ) &&
         Array.isArray(keyword.source_evidence) &&
         keyword.source_evidence.length > 0 &&
-        keyword.source_evidence.length <= 3 &&
+        keyword.source_evidence.length <= 2 &&
         keyword.source_evidence.every(
           (evidence) =>
             isGroundedExcerpt(evidence, sourceText) &&
@@ -1167,13 +1222,13 @@ function validateAnalysisReadyForCharge(
         (keyword.classification_confidence === "high" ||
           keyword.classification_confidence === "medium" ||
           keyword.classification_confidence === "low") &&
-        keyword.reason ===
-          buildSelectionReason(
-            keyword.term || keyword.normalized_term,
-            keyword.concept_facets,
-            keyword.concept_basis,
-            keyword.source_evidence,
-          ) &&
+        isMeaningfulSelectionReason(
+          keyword.reason,
+          keyword.term,
+          keyword.normalized_term,
+          keyword.synonyms,
+          keyword.concept_basis,
+        ) &&
         Boolean(keyword.classification_reason.trim()),
     );
 
@@ -2225,13 +2280,13 @@ Tasks:
 - Also return neighboring context terms and 2-6 concise search phrases derived from the complete technical concept.
 - Interpret each keyword in the context of the claimed combination, not as an isolated dictionary term. Preserve limiting relationships such as "mounted on", "responsive to", "between", "wirelessly coupled", and relevant numerical or material constraints in the search phrases.
 - Select a keyword only when it materially expresses at least one populated facet of the common technical_concept. Frequency alone is never sufficient.
-- For every keyword, return concept_facets containing 1-4 exact facet keys from this list: object_or_system, purpose_or_problem, application_or_use, components, component_relationships, material_or_composition, manufacturing_or_processing_steps, operation, control_means, controlled_variables, operating_conditions, technical_effect.
-- For every keyword, return 1-3 short source_evidence excerpts copied exactly from the input. Each excerpt must contain the keyword, its source-language form, or one returned synonym, and must also support the identified concept facet. Do not paraphrase, translate, add ellipses, or alter whitespace inside an excerpt.
+- For every keyword, return concept_facets containing only the 1-3 most relevant exact facet keys from this list: object_or_system, purpose_or_problem, application_or_use, components, component_relationships, material_or_composition, manufacturing_or_processing_steps, operation, control_means, controlled_variables, operating_conditions, technical_effect. Do not attach broad facets merely because the keyword appears somewhere in them.
+- For every keyword, return 1-2 short source_evidence excerpts copied exactly from the input. Each excerpt must contain the keyword, its source-language form, or one returned synonym, and must directly demonstrate the keyword's technical role or limiting relationship. Do not paraphrase, translate, add ellipses, or alter whitespace inside an excerpt.
 - Treat user-selected keywords as candidates for particular consideration, not mandatory output. Exclude a selected term if the input does not provide exact evidence linking it to the extracted common technical concept.
 - Count occurrences across direct terms and clear synonyms; rank by descending frequency.
 - Do not generate, infer, copy, or suggest IPC, CPC, FI, or F-term codes.
 - Always return empty ipc, cpc, fi, and f_term arrays. The server derives every classification code exclusively from Supabase catalog records after your response.
-- Include a concise provisional reason that identifies the same concept facets and evidence. The server will independently rebuild and validate the final selection rationale.
+- In reason, write 1-2 plain-language sentences explaining the keyword's specific structural or functional role in the complete technical concept and why that role makes the term useful for patent retrieval. Mention a concrete relationship, operation, constraint, problem, or effect from the input. Do not list facet names or repeat concept values. Do not use meta-language such as "selected because," "the input states," "concept facet," or "source evidence." Avoid tautologies such as saying a sample rack matters merely because it is a sample rack.
 - Use low confidence when classification support is weak.
 - Do not include a classification-like alphanumeric symbol in any synonym, code array, technical interpretation, search phrase, or reason.
 - Do not claim that any code is database verified. The server performs database retrieval and an independent catalog-integrity check after your response.`,

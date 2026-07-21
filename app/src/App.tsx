@@ -24,8 +24,23 @@ import {
   Sparkles,
 } from "lucide-react";
 type PlanId = "test" | "business";
-const EXPECTED_ANALYSIS_SCHEMA_VERSION = "common-concept-v2";
+const EXPECTED_ANALYSIS_SCHEMA_VERSION = "concept-rationale-v3";
 const MAX_INPUT_CHARACTERS = 10_000;
+
+const CONCEPT_FACET_LABELS: Record<string, string> = {
+  object_or_system: "Object/system",
+  purpose_or_problem: "Purpose or problem",
+  application_or_use: "Application/use",
+  components: "Components",
+  component_relationships: "Component relationships",
+  material_or_composition: "Material/composition",
+  manufacturing_or_processing_steps: "Manufacturing or processing steps",
+  operation: "Operation",
+  control_means: "Control means",
+  controlled_variables: "Controlled variables",
+  operating_conditions: "Operating conditions",
+  technical_effect: "Technical effect",
+};
 
 function TechnicalInterpretationCell({
   interpretation,
@@ -297,6 +312,15 @@ function ClassificationRouteCell({
 
 function KeywordResultCard({ keyword }: { keyword: KeywordClassification }) {
   const synonyms = Array.isArray(keyword.synonyms) ? keyword.synonyms : [];
+  const conceptFacets = Array.isArray(keyword.concept_facets)
+    ? keyword.concept_facets
+    : [];
+  const conceptBasis = Array.isArray(keyword.concept_basis)
+    ? keyword.concept_basis
+    : [];
+  const sourceEvidence = Array.isArray(keyword.source_evidence)
+    ? keyword.source_evidence
+    : [];
 
   return (
     <article
@@ -362,6 +386,73 @@ function KeywordResultCard({ keyword }: { keyword: KeywordClassification }) {
         )}
       </section>
 
+      <section
+        style={{
+          display: "grid",
+          gap: "0.55rem",
+          padding: "0.8rem",
+          border: "1px solid #a7f3d0",
+          borderRadius: "0.75rem",
+          background: "#ecfdf5",
+        }}
+      >
+        <strong style={{ color: "#065f46" }}>
+          Why this keyword was selected
+        </strong>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
+          {conceptFacets.map((facet) => (
+            <span
+              key={facet}
+              style={{
+                padding: "0.2rem 0.48rem",
+                borderRadius: "999px",
+                background: "#d1fae5",
+                color: "#065f46",
+                fontSize: "0.74rem",
+                fontWeight: 800,
+              }}
+            >
+              {CONCEPT_FACET_LABELS[facet] ?? facet}
+            </span>
+          ))}
+        </div>
+        <div>
+          <strong style={{ fontSize: "0.76rem", color: "#475569" }}>
+            Technical-concept basis
+          </strong>
+          <ul style={{ margin: "0.3rem 0 0", paddingLeft: "1.25rem" }}>
+            {conceptBasis.map((basis) => (
+              <li key={basis}>{basis}</li>
+            ))}
+          </ul>
+        </div>
+        <div>
+          <strong style={{ fontSize: "0.76rem", color: "#475569" }}>
+            Exact input evidence
+          </strong>
+          <div style={{ display: "grid", gap: "0.35rem", marginTop: "0.3rem" }}>
+            {sourceEvidence.map((evidence) => (
+              <blockquote
+                key={evidence}
+                style={{
+                  margin: 0,
+                  padding: "0.45rem 0.6rem",
+                  borderLeft: "3px solid #34d399",
+                  background: "#ffffff",
+                  color: "#334155",
+                  fontSize: "0.8rem",
+                }}
+              >
+                “{evidence}”
+              </blockquote>
+            ))}
+          </div>
+        </div>
+        <div style={{ fontSize: "0.82rem", lineHeight: 1.45 }}>
+          <strong>Selection rationale:</strong> {keyword.reason}
+        </div>
+      </section>
+
       <ClassificationRouteCell keyword={keyword} />
 
       <section
@@ -386,7 +477,8 @@ function KeywordResultCard({ keyword }: { keyword: KeywordClassification }) {
           </span>
         </div>
         <div>
-          <strong>Reason:</strong> {keyword.reason}
+          <strong>Classification rationale:</strong>{" "}
+          {keyword.classification_reason}
         </div>
       </section>
     </article>
@@ -1194,11 +1286,20 @@ export default function App() {
         !Array.isArray(data.keywords) ||
         data.keywords.some(
           (keyword: KeywordClassification) =>
-            !Array.isArray(keyword.synonyms) || keyword.synonyms.length === 0,
+            !Array.isArray(keyword.synonyms) ||
+            keyword.synonyms.length === 0 ||
+            !Array.isArray(keyword.concept_facets) ||
+            keyword.concept_facets.length === 0 ||
+            !Array.isArray(keyword.concept_basis) ||
+            keyword.concept_basis.length === 0 ||
+            !Array.isArray(keyword.source_evidence) ||
+            keyword.source_evidence.length === 0 ||
+            !keyword.reason ||
+            !keyword.classification_reason,
         )
       ) {
         throw new Error(
-          "The deployed analyze Edge Function is outdated. Deploy the matching index(48).ts that returns common-concept-v2.",
+          "The deployed analyze Edge Function is outdated. Deploy the matching index(48).ts that returns concept-rationale-v3.",
         );
       }
 
@@ -1434,7 +1535,9 @@ export default function App() {
                   </span>
                   <span>
                     <span className="user-detail-label">Expiration date</span>
-                    <strong>{formatLocalExpirationDate(creditsExpireAt)}</strong>
+                    <strong>
+                      {formatLocalExpirationDate(creditsExpireAt)}
+                    </strong>
                   </span>
                 </span>
               )}

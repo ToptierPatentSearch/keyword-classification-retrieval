@@ -1342,7 +1342,7 @@ export default function App() {
 
     try {
       const { downloadAnalysisPdf } = await import("./pdf");
-      downloadAnalysisPdf(result);
+      await downloadAnalysisPdf(result);
     } catch (pdfError) {
       setError(asErrorMessage(pdfError));
     } finally {

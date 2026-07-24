@@ -205,6 +205,8 @@ let requiredDatabaseFunctionsCheck: Promise<void> | null = null;
 
 const NO_CREDITS_MESSAGE =
   "分析クレジットがありません。Test pack または Business pack を購入してください。";
+const DUPLICATE_INPUT_MESSAGE =
+  "This patent text has already been analyzed. Clear the text, enter different patent text, and retry. No additional credit was consumed.";
 
 const technicalConceptSchema = {
   type: "object",
@@ -574,6 +576,11 @@ async function sha256Hex(value: string): Promise<string> {
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("");
 }
+
+function normalizeTextForCreditDeduplication(text: string): string {
+  return text.normalize("NFKC").replace(/\s+/gu, " ").trim();
+}
+
 function validateText(body: AnalyzeRequest): string {
   const rawText = typeof body.text === "string" ? body.text : body.input;
 
@@ -2469,12 +2476,19 @@ Deno.serve(async (request: Request) => {
     const text = validateText(body);
     const requestId = validateRequestId(body.request_id);
     const selectedKeywords = validateSelectedKeywords(body.selected_keywords);
-    const inputHash = await sha256Hex(
+    const normalizedTextHash = await sha256Hex(
+      normalizeTextForCreditDeduplication(text),
+    );
+    const legacyInputHash = await sha256Hex(
       JSON.stringify({
         text,
         selected_keywords: selectedKeywords,
       }),
     );
+    const compatibleInputHashes = Array.from(
+      new Set([normalizedTextHash, legacyInputHash]),
+    );
+    const inputHash = normalizedTextHash;
 
     auditRequestId = requestId;
     auditInputHash = inputHash;
@@ -2492,8 +2506,8 @@ Deno.serve(async (request: Request) => {
 
     auditStage = "idempotency_check";
     const {
-      data: existingTransaction,
-      error: existingTransactionError,
+      data: existingRequestTransaction,
+      error: existingRequestTransactionError,
     } = await adminClient
       .from("credit_transactions")
       .select("input_hash")
@@ -2503,10 +2517,10 @@ Deno.serve(async (request: Request) => {
       .limit(1)
       .maybeSingle();
 
-    if (existingTransactionError) {
+    if (existingRequestTransactionError) {
       console.error(
-        "Analysis idempotency check failed:",
-        existingTransactionError,
+        "Request-ID idempotency check failed:",
+        existingRequestTransactionError,
       );
 
       throw new HttpError(
@@ -2515,15 +2529,64 @@ Deno.serve(async (request: Request) => {
       );
     }
 
-    const isReplay = existingTransaction !== null;
-
     if (
-      isReplay &&
-      existingTransaction.input_hash !== inputHash
+      existingRequestTransaction !== null &&
+      !compatibleInputHashes.includes(existingRequestTransaction.input_hash)
     ) {
       throw new HttpError(
         409,
         "request_id was previously used with different input.",
+      );
+    }
+
+    const {
+      data: existingInputTransaction,
+      error: existingInputTransactionError,
+    } = await adminClient
+      .from("credit_transactions")
+      .select("request_id")
+      .eq("user_id", user.id)
+      .eq("source", "analysis")
+      .in("input_hash", compatibleInputHashes)
+      .limit(1)
+      .maybeSingle();
+
+    if (existingInputTransactionError) {
+      console.error(
+        "Input-hash idempotency check failed:",
+        existingInputTransactionError,
+      );
+
+      throw new HttpError(
+        503,
+        "Credit database is temporarily unavailable. Retry the same input; no additional credit was consumed.",
+      );
+    }
+
+    const isReplay =
+      existingRequestTransaction !== null ||
+      existingInputTransaction !== null;
+
+    if (isReplay) {
+      logAnalysisAudit("rejected", {
+        stage: "duplicate_input",
+        user_id: auditUserId,
+        request_id: auditRequestId,
+        input_hash: auditInputHash,
+        input_characters: auditInputCharacters,
+        selected_keyword_count: auditSelectedKeywordCount,
+        replayed: true,
+        status_code: 409,
+        error_message: DUPLICATE_INPUT_MESSAGE,
+        duration_ms: Date.now() - analysisStartedAt,
+      });
+
+      return jsonResponse(
+        {
+          error: DUPLICATE_INPUT_MESSAGE,
+          replayed: true,
+        },
+        { status: 409 },
       );
     }
 
@@ -2637,35 +2700,72 @@ Deno.serve(async (request: Request) => {
     });
 
     auditStage = "credit_consumption";
-    const { data: consumptionData, error: consumeError } =
-      await adminClient.rpc("consume_analysis_credit_once_v2", {
-        p_user_id: user.id,
-        p_source: "analysis",
-        p_request_id: requestId,
-        p_input_hash: inputHash,
-      });
+    let consumption: CreditConsumptionResult;
 
-    if (consumeError) {
-      console.error("Atomic credit finalization failed:", consumeError);
+    if (isReplay) {
+      consumption = {
+        consumed: true,
+        remaining_credits: Number.isFinite(currentCredits)
+          ? Math.max(currentCredits, 0)
+          : 0,
+        replayed: true,
+      };
+    } else {
+      const { data: consumptionData, error: consumeError } =
+        await adminClient.rpc("consume_analysis_credit_once_v2", {
+          p_user_id: user.id,
+          p_source: "analysis",
+          p_request_id: requestId,
+          p_input_hash: inputHash,
+        });
 
-      if (
-        consumeError.message.includes(
-          "request_id was previously used with different input",
-        )
-      ) {
+      if (consumeError) {
+        console.error("Atomic credit finalization failed:", consumeError);
+
+        if (
+          consumeError.message.includes(
+            "request_id was previously used with different input",
+          )
+        ) {
+          throw new HttpError(
+            409,
+            "request_id was previously used with different input.",
+          );
+        }
+
         throw new HttpError(
-          409,
-          "request_id was previously used with different input.",
+          503,
+          "Credit finalization is temporarily unavailable. Retry the same request; idempotency prevents a duplicate charge.",
         );
       }
 
-      throw new HttpError(
-        503,
-        "Credit finalization is temporarily unavailable. Retry the same request; idempotency prevents a duplicate charge.",
-      );
+      consumption = parseCreditConsumptionResult(consumptionData);
     }
 
-    const consumption = parseCreditConsumptionResult(consumptionData);
+    if (consumption.replayed) {
+      logAnalysisAudit("rejected", {
+        stage: "duplicate_input_race",
+        user_id: auditUserId,
+        request_id: auditRequestId,
+        input_hash: auditInputHash,
+        input_characters: auditInputCharacters,
+        selected_keyword_count: auditSelectedKeywordCount,
+        remaining_credits: consumption.remaining_credits,
+        replayed: true,
+        status_code: 409,
+        error_message: DUPLICATE_INPUT_MESSAGE,
+        duration_ms: Date.now() - analysisStartedAt,
+      });
+
+      return jsonResponse(
+        {
+          error: DUPLICATE_INPUT_MESSAGE,
+          remainingCredits: consumption.remaining_credits,
+          replayed: true,
+        },
+        { status: 409 },
+      );
+    }
 
     if (!consumption.consumed) {
       logAnalysisAudit("rejected", {

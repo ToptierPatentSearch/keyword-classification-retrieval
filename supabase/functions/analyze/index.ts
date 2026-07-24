@@ -9,6 +9,21 @@ type PatentLanguage = "en" | "ja";
 type ClassificationSystem = "IPC" | "CPC" | "FI" | "F-term";
 type CatalogClassificationSystem = Exclude<ClassificationSystem, "F-term">;
 type ClassificationVerificationStatus = "database_verified";
+const TECHNICAL_CONCEPT_FACETS = [
+  "object_or_system",
+  "purpose_or_problem",
+  "application_or_use",
+  "components",
+  "component_relationships",
+  "material_or_composition",
+  "manufacturing_or_processing_steps",
+  "operation",
+  "control_means",
+  "controlled_variables",
+  "operating_conditions",
+  "technical_effect",
+] as const;
+type TechnicalConceptFacet = (typeof TECHNICAL_CONCEPT_FACETS)[number];
 
 interface AnalyzeRequest {
   text?: unknown;
@@ -110,6 +125,9 @@ interface KeywordClassification {
   term: string;
   normalized_term: string;
   synonyms: string[];
+  concept_facets: TechnicalConceptFacet[];
+  concept_basis: string[];
+  source_evidence: string[];
   count: number;
   rank: number;
   ipc: string[];
@@ -127,6 +145,7 @@ interface KeywordClassification {
   classification_route?: ClassificationRoute;
   classification_confidence: Confidence;
   reason: string;
+  classification_reason: string;
 }
 
 interface AnalysisResult {
@@ -173,7 +192,7 @@ const MAX_SELECTED_AREAS_PER_SYSTEM = 2;
 const MAX_SELECTED_FI = 2;
 const MAX_SELECTED_F_TERM_THEMES = 2;
 const MAX_SELECTED_F_TERMS = 3;
-const ANALYSIS_SCHEMA_VERSION = "common-concept-v2";
+const ANALYSIS_SCHEMA_VERSION = "concept-rationale-v3";
 const MODEL = Deno.env.get("OPENAI_MODEL") ?? "gpt-4.1-mini";
 const REQUIRED_DATABASE_FUNCTIONS = [
   "consume_analysis_credit_once_v2",
@@ -279,6 +298,8 @@ const responseSchema = {
           "term",
           "normalized_term",
           "synonyms",
+          "concept_facets",
+          "source_evidence",
           "count",
           "rank",
           "ipc",
@@ -297,6 +318,21 @@ const responseSchema = {
             maxItems: 8,
             items: { type: "string" },
           },
+          concept_facets: {
+            type: "array",
+            minItems: 1,
+            maxItems: 3,
+            items: {
+              type: "string",
+              enum: TECHNICAL_CONCEPT_FACETS,
+            },
+          },
+          source_evidence: {
+            type: "array",
+            minItems: 1,
+            maxItems: 2,
+            items: { type: "string", minLength: 3, maxLength: 240 },
+          },
           count: { type: "integer", minimum: 1 },
           rank: { type: "integer", minimum: 1 },
           ipc: { type: "array", maxItems: 0, items: { type: "string" } },
@@ -307,7 +343,7 @@ const responseSchema = {
             type: "string",
             enum: ["high", "medium", "low"],
           },
-          reason: { type: "string" },
+          reason: { type: "string", minLength: 40, maxLength: 600 },
         },
       },
     },
@@ -710,8 +746,230 @@ function normalizeTechnicalInterpretation(
   };
 }
 
+function normalizeComparableText(value: string): string {
+  return value.normalize("NFKC").toLowerCase().replace(/\s+/gu, " ").trim();
+}
+
+function compactComparableText(value: string): string {
+  return normalizeComparableText(value).replace(
+    /[^a-z0-9\u3040-\u30ff\u3400-\u9fff]+/gu,
+    "",
+  );
+}
+
+function normalizeConceptFacets(value: unknown): TechnicalConceptFacet[] {
+  if (!Array.isArray(value)) return [];
+
+  const allowed = new Set<string>(TECHNICAL_CONCEPT_FACETS);
+  return Array.from(
+    new Set(
+      value
+        .filter((facet): facet is string => typeof facet === "string")
+        .map((facet) => facet.trim())
+        .filter((facet) => allowed.has(facet)),
+    ),
+  ).slice(0, 4) as TechnicalConceptFacet[];
+}
+
+function conceptFacetValues(
+  concept: TechnicalInterpretation,
+  facet: TechnicalConceptFacet,
+): string[] {
+  const value = concept[facet];
+  return (Array.isArray(value) ? value : [value])
+    .map((item) => String(item ?? "").trim())
+    .filter(Boolean);
+}
+
+function conceptBasisForFacets(
+  concept: TechnicalInterpretation,
+  facets: TechnicalConceptFacet[],
+): string[] {
+  return Array.from(
+    new Set(facets.flatMap((facet) => conceptFacetValues(concept, facet))),
+  ).slice(0, 12);
+}
+
+function isGroundedExcerpt(excerpt: string, sourceText: string): boolean {
+  const normalizedExcerpt = normalizeComparableText(excerpt);
+  const normalizedSource = normalizeComparableText(sourceText);
+  return (
+    normalizedExcerpt.length >= 3 &&
+    normalizedSource.includes(normalizedExcerpt)
+  );
+}
+
+function evidenceContainsKeyword(
+  evidence: string,
+  term: string,
+  normalizedTerm: string,
+  synonyms: string[],
+): boolean {
+  const compactEvidence = compactComparableText(evidence);
+  return [term, normalizedTerm, ...synonyms].some((variant) => {
+    const compactVariant = compactComparableText(variant);
+    return (
+      compactVariant.length >= 2 && compactEvidence.includes(compactVariant)
+    );
+  });
+}
+
+function comparisonTokens(value: string): Set<string> {
+  const normalized = normalizeComparableText(value);
+  const tokens =
+    normalized.match(/[a-z0-9]{3,}|[\u3040-\u30ff\u3400-\u9fff]{2,}/gu) ?? [];
+  const expanded = new Set<string>();
+
+  for (const token of tokens) {
+    expanded.add(token);
+    if (/^[\u3040-\u30ff\u3400-\u9fff]+$/u.test(token) && token.length > 2) {
+      for (let index = 0; index < token.length - 1; index += 1) {
+        expanded.add(token.slice(index, index + 2));
+      }
+    }
+  }
+
+  return expanded;
+}
+
+function hasMeaningfulTextOverlap(left: string, right: string): boolean {
+  const compactLeft = compactComparableText(left);
+  const compactRight = compactComparableText(right);
+
+  if (
+    compactLeft.length >= 3 &&
+    compactRight.length >= 3 &&
+    (compactLeft.includes(compactRight) || compactRight.includes(compactLeft))
+  ) {
+    return true;
+  }
+
+  const leftTokens = comparisonTokens(left);
+  const rightTokens = comparisonTokens(right);
+  return Array.from(leftTokens).some((token) => rightTokens.has(token));
+}
+
+function overlapScore(left: string, right: string): number {
+  const leftTokens = comparisonTokens(left);
+  const rightTokens = comparisonTokens(right);
+  let score = 0;
+
+  for (const token of leftTokens) {
+    if (rightTokens.has(token)) score += 1;
+  }
+
+  return score;
+}
+
+function selectRelevantConceptBasis(
+  candidates: string[],
+  term: string,
+  normalizedTerm: string,
+  synonyms: string[],
+  sourceEvidence: string[],
+): string[] {
+  return candidates
+    .map((basis, index) => {
+      const containsKeyword = evidenceContainsKeyword(
+        basis,
+        term,
+        normalizedTerm,
+        synonyms,
+      );
+      const evidenceScore = Math.max(
+        0,
+        ...sourceEvidence.map((evidence) => overlapScore(basis, evidence)),
+      );
+
+      return {
+        basis,
+        index,
+        score: (containsKeyword ? 10 : 0) + Math.min(6, evidenceScore),
+      };
+    })
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .slice(0, 3)
+    .map((item) => item.basis);
+}
+
+function isMeaningfulSelectionReason(
+  reason: string,
+  term: string,
+  normalizedTerm: string,
+  synonyms: string[],
+  conceptBasis: string[],
+): boolean {
+  const normalizedReason = normalizeComparableText(reason);
+  if (normalizedReason.length < 40 || normalizedReason.length > 600) {
+    return false;
+  }
+
+  if (
+    /selected because|input (explicitly )?states|concept('?s)? facet|source evidence/iu.test(
+      normalizedReason,
+    )
+  ) {
+    return false;
+  }
+
+  return (
+    evidenceContainsKeyword(reason, term, normalizedTerm, synonyms) &&
+    conceptBasis.some((basis) => hasMeaningfulTextOverlap(reason, basis))
+  );
+}
+
+function rationaleFocus(facets: TechnicalConceptFacet[]): string {
+  if (facets.includes("component_relationships")) {
+    return "relationship between components";
+  }
+  if (facets.includes("operation")) return "technical operation";
+  if (facets.includes("control_means")) return "control mechanism";
+  if (facets.includes("controlled_variables")) return "controlled variable";
+  if (facets.includes("technical_effect")) return "technical effect";
+  if (facets.includes("manufacturing_or_processing_steps")) {
+    return "processing step";
+  }
+  if (facets.includes("material_or_composition")) {
+    return "material or composition role";
+  }
+  if (facets.includes("operating_conditions")) return "operating condition";
+  if (facets.includes("purpose_or_problem")) return "technical purpose";
+  if (facets.includes("application_or_use")) return "technical application";
+  if (facets.includes("components")) return "component role";
+  return "object or system role";
+}
+
+function buildGroundedSelectionReason(
+  term: string,
+  conceptFacets: TechnicalConceptFacet[],
+  conceptBasis: string[],
+  sourceEvidence: string[],
+): string {
+  const evidence = sourceEvidence
+    .map((excerpt, index) => ({
+      excerpt,
+      index,
+      score: Math.max(
+        0,
+        ...conceptBasis.map((basis) => overlapScore(basis, excerpt)),
+      ),
+    }))
+    .sort((a, b) => b.score - a.score || a.index - b.index)[0]?.excerpt;
+
+  if (!term || !evidence) return "";
+
+  const focus = rationaleFocus(conceptFacets);
+  const reason = `“${term}” is grounded in this disclosed ${focus}: “${evidence}”. This specific role makes the term useful for retrieving patents with the same disclosed ${focus}.`;
+
+  if (reason.length <= 600) return reason;
+
+  return `The exact excerpt “${evidence}” grounds this keyword in a concrete ${focus}. That disclosed role makes the keyword useful for focused patent retrieval.`;
+}
+
 function normalizeResult(
   result: AnalysisResult,
+  sourceText: string,
   warning?: string,
 ): AnalysisResult {
   const fallbackConceptTerm = Array.isArray(result.keywords)
@@ -745,11 +1003,54 @@ function normalizeResult(
         (synonym) =>
           !excludedSynonyms.has(synonym.normalize("NFKC").toLowerCase()),
       );
+      const conceptFacets = normalizeConceptFacets(keyword.concept_facets);
+      const completeConceptBasis = conceptBasisForFacets(
+        technicalConcept,
+        conceptFacets,
+      );
+      const sourceEvidence = cleanTextList(keyword.source_evidence, 2).filter(
+        (evidence) =>
+          isGroundedExcerpt(evidence, sourceText) &&
+          evidenceContainsKeyword(evidence, term, normalizedTerm, synonyms) &&
+          completeConceptBasis.some((basis) =>
+            hasMeaningfulTextOverlap(basis, evidence),
+          ),
+      );
+      const conceptBasis = selectRelevantConceptBasis(
+        completeConceptBasis,
+        term,
+        normalizedTerm,
+        synonyms,
+        sourceEvidence,
+      );
+      const keywordRepresentedInConcept = conceptBasis.some((basis) =>
+        evidenceContainsKeyword(basis, term, normalizedTerm, synonyms),
+      );
+      const conceptLinked =
+        conceptBasis.length > 0 &&
+        sourceEvidence.length > 0 &&
+        keywordRepresentedInConcept &&
+        conceptBasis.some((basis) =>
+          sourceEvidence.some((evidence) =>
+            hasMeaningfulTextOverlap(basis, evidence),
+          ),
+        );
+      const reason = conceptLinked
+        ? buildGroundedSelectionReason(
+            term || normalizedTerm,
+            conceptFacets,
+            conceptBasis,
+            sourceEvidence,
+          )
+        : "";
 
       return {
         term,
         normalized_term: normalizedTerm,
         synonyms,
+        concept_facets: conceptFacets,
+        concept_basis: conceptBasis,
+        source_evidence: sourceEvidence,
         count: Math.max(1, Math.trunc(Number(keyword.count) || 1)),
         rank: Math.max(1, Math.trunc(Number(keyword.rank) || 1)),
         // Classification codes are never accepted from model output.
@@ -758,10 +1059,20 @@ function normalizeResult(
         fi: [],
         f_term: [],
         classification_confidence: confidence,
-        reason: String(keyword.reason ?? "").trim(),
+        // The displayed rationale is server-built from an exact grounded excerpt;
+        // free-form model prose is never returned or used for credit validation.
+        reason,
+        classification_reason: "Pending catalog retrieval.",
       };
     })
-    .filter((keyword) => keyword.term || keyword.normalized_term)
+    .filter(
+      (keyword) =>
+        (keyword.term || keyword.normalized_term) &&
+        keyword.concept_facets.length > 0 &&
+        keyword.concept_basis.length > 0 &&
+        keyword.source_evidence.length > 0 &&
+        Boolean(keyword.reason),
+    )
     .sort((a, b) => b.count - a.count || a.rank - b.rank)
     .map((keyword, index) => ({ ...keyword, rank: index + 1 }));
 
@@ -820,7 +1131,21 @@ function isValidTechnicalConcept(
   );
 }
 
-function validateAnalysisReadyForCharge(result: AnalysisResult): void {
+function sameNormalizedTextSet(left: string[], right: string[]): boolean {
+  const normalize = (values: string[]) =>
+    Array.from(new Set(values.map(normalizeComparableText))).sort();
+  const normalizedLeft = normalize(left);
+  const normalizedRight = normalize(right);
+  return (
+    normalizedLeft.length === normalizedRight.length &&
+    normalizedLeft.every((value, index) => value === normalizedRight[index])
+  );
+}
+
+function validateAnalysisReadyForCharge(
+  result: AnalysisResult,
+  sourceText: string,
+): void {
   const validLanguage = result.language === "en" || result.language === "ja";
   const validSchemaVersion =
     result.analysisSchemaVersion === ANALYSIS_SCHEMA_VERSION;
@@ -842,6 +1167,51 @@ function validateAnalysisReadyForCharge(result: AnalysisResult): void {
         keyword.synonyms.length > 0 &&
         keyword.synonyms.length <= 8 &&
         keyword.synonyms.every((synonym) => Boolean(synonym.trim())) &&
+        Array.isArray(keyword.concept_facets) &&
+        keyword.concept_facets.length > 0 &&
+        keyword.concept_facets.length <= 3 &&
+        keyword.concept_facets.every((facet) =>
+          TECHNICAL_CONCEPT_FACETS.includes(facet),
+        ) &&
+        Array.isArray(keyword.concept_basis) &&
+        keyword.concept_basis.length > 0 &&
+        sameNormalizedTextSet(
+          keyword.concept_basis,
+          selectRelevantConceptBasis(
+            conceptBasisForFacets(
+              result.technical_concept,
+              keyword.concept_facets,
+            ),
+            keyword.term,
+            keyword.normalized_term,
+            keyword.synonyms,
+            keyword.source_evidence,
+          ),
+        ) &&
+        keyword.concept_basis.some((basis) =>
+          evidenceContainsKeyword(
+            basis,
+            keyword.term,
+            keyword.normalized_term,
+            keyword.synonyms,
+          ),
+        ) &&
+        Array.isArray(keyword.source_evidence) &&
+        keyword.source_evidence.length > 0 &&
+        keyword.source_evidence.length <= 2 &&
+        keyword.source_evidence.every(
+          (evidence) =>
+            isGroundedExcerpt(evidence, sourceText) &&
+            evidenceContainsKeyword(
+              evidence,
+              keyword.term,
+              keyword.normalized_term,
+              keyword.synonyms,
+            ) &&
+            keyword.concept_basis.some((basis) =>
+              hasMeaningfulTextOverlap(basis, evidence),
+            ),
+        ) &&
         Number.isInteger(keyword.count) &&
         keyword.count > 0 &&
         Number.isInteger(keyword.rank) &&
@@ -898,7 +1268,14 @@ function validateAnalysisReadyForCharge(result: AnalysisResult): void {
         (keyword.classification_confidence === "high" ||
           keyword.classification_confidence === "medium" ||
           keyword.classification_confidence === "low") &&
-        Boolean(keyword.reason.trim()),
+        isMeaningfulSelectionReason(
+          keyword.reason,
+          keyword.term,
+          keyword.normalized_term,
+          keyword.synonyms,
+          keyword.concept_basis,
+        ) &&
+        Boolean(keyword.classification_reason.trim()),
     );
 
   if (
@@ -948,9 +1325,7 @@ async function loadCatalogRowsForCodes(
   // a database-backed result. This still fails closed: no model-provided code
   // is accepted unless a row with the same normalized code and system exists.
   const normalizedCatalogCodes = Array.from(
-    new Set(
-      uniqueCodes(codes).map(normalizeCatalogLookupCode).filter(Boolean),
-    ),
+    new Set(uniqueCodes(codes).map(normalizeCatalogLookupCode).filter(Boolean)),
   );
   const rowsByCode = new Map<string, ClassificationCandidate>();
 
@@ -1888,7 +2263,7 @@ async function lookupAndRankClassifications(
           ? "medium"
           : "low";
 
-    keyword.reason =
+    keyword.classification_reason =
       catalogBackedCount > 0
         ? "Classification candidates were retrieved from Supabase and ranked against the complete technical interpretation. No model-generated classification code was accepted."
         : "No Supabase classification record passed the technical-context threshold. Classification codes were left empty rather than generated by AI.";
@@ -1897,6 +2272,10 @@ async function lookupAndRankClassifications(
   warning = appendWarning(
     warning,
     "The displayed route is enforced as technical concept → catalog-backed IPC/CPC area → linked FI subdivision → FI-scoped F-term theme/aspect. It is search guidance, not an official classification determination; confirm the current hierarchy and scope in J-PlatPat before relying on it.",
+  );
+  warning = appendWarning(
+    warning,
+    "Each displayed keyword passed the concept-rationale gate: a named technical-concept facet, a server-derived concept basis, and an exact input-text excerpt are required before the result can consume a credit.",
   );
 
   if (!fTermCatalogAvailable) {
@@ -1946,10 +2325,14 @@ Tasks:
 - Use concise strings for single-value facets and concise arrays for multi-value facets. Only non-core facets may be an empty string or empty array when the input does not support them.
 - Also return neighboring context terms and 2-6 concise search phrases derived from the complete technical concept.
 - Interpret each keyword in the context of the claimed combination, not as an isolated dictionary term. Preserve limiting relationships such as "mounted on", "responsive to", "between", "wirelessly coupled", and relevant numerical or material constraints in the search phrases.
+- Select a keyword only when it materially expresses at least one populated facet of the common technical_concept. Frequency alone is never sufficient.
+- For every keyword, return concept_facets containing only the 1-3 most relevant exact facet keys from this list: object_or_system, purpose_or_problem, application_or_use, components, component_relationships, material_or_composition, manufacturing_or_processing_steps, operation, control_means, controlled_variables, operating_conditions, technical_effect. Do not attach broad facets merely because the keyword appears somewhere in them.
+- For every keyword, return 1-2 short source_evidence excerpts copied exactly from the input. Each excerpt must contain the keyword, its source-language form, or one returned synonym, and must directly demonstrate the keyword's technical role or limiting relationship. Do not paraphrase, translate, add ellipses, or alter whitespace inside an excerpt.
+- Treat user-selected keywords as candidates for particular consideration, not mandatory output. Exclude a selected term if the input does not provide exact evidence linking it to the extracted common technical concept.
 - Count occurrences across direct terms and clear synonyms; rank by descending frequency.
 - Do not generate, infer, copy, or suggest IPC, CPC, FI, or F-term codes.
 - Always return empty ipc, cpc, fi, and f_term arrays. The server derives every classification code exclusively from Supabase catalog records after your response.
-- Include a concise, specific reason grounded in the input text.
+- In reason, write 1-2 plain-language sentences explaining the keyword's specific structural or functional role in the complete technical concept and why that role makes the term useful for patent retrieval. Mention a concrete relationship, operation, constraint, problem, or effect from the input. Do not list facet names or repeat concept values. Do not use meta-language such as "selected because," "the input states," "concept facet," or "source evidence." Avoid tautologies such as saying a sample rack matters merely because it is a sample rack.
 - Use low confidence when classification support is weak.
 - Do not include a classification-like alphanumeric symbol in any synonym, code array, technical interpretation, search phrase, or reason.
 - Do not claim that any code is database verified. The server performs database retrieval and an independent catalog-integrity check after your response.`,
@@ -1963,7 +2346,7 @@ Tasks:
             type: "input_text",
             text: `Analyze this patent text. UTF-8 Japanese content may be present.
 
-Selected keywords that must receive particular consideration:
+User-selected keyword candidates for particular consideration (they still must pass the technical-concept and evidence requirements):
 ${selectedKeywords.join(", ")}
 
 Patent text:
@@ -1988,7 +2371,11 @@ ${text}`,
     throw new Error("OpenAI returned an empty response.");
   }
 
-  return normalizeResult(JSON.parse(outputText) as AnalysisResult, warning);
+  return normalizeResult(
+    JSON.parse(outputText) as AnalysisResult,
+    text,
+    warning,
+  );
 }
 
 Deno.serve(async (request: Request) => {
@@ -2130,7 +2517,10 @@ Deno.serve(async (request: Request) => {
 
     const isReplay = existingTransaction !== null;
 
-    if (isReplay && existingTransaction.input_hash !== inputHash) {
+    if (
+      isReplay &&
+      existingTransaction.input_hash !== inputHash
+    ) {
       throw new HttpError(
         409,
         "request_id was previously used with different input.",
@@ -2226,7 +2616,7 @@ Deno.serve(async (request: Request) => {
     }
 
     auditStage = "pre_charge_validation";
-    validateAnalysisReadyForCharge(result);
+    validateAnalysisReadyForCharge(result, text);
 
     const preparedResponse = {
       ...result,

@@ -2,6 +2,8 @@ import Footer from "./components/Footer";
 import termsOfUseText from "./components/terms-of-use.txt?raw";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import UserActivityPage from "./pages/admin/UserActivityPage";
+import UserConsentsPage from "./pages/admin/UserConsentsPage";
+import UserPackagePurchasesPage from "./pages/admin/UserPackagePurchasesPage";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./supabaseClient";
 import type {
@@ -26,6 +28,52 @@ import {
 type PlanId = "test" | "business";
 const EXPECTED_ANALYSIS_SCHEMA_VERSION = "concept-rationale-v3";
 const MAX_INPUT_CHARACTERS = 10_000;
+const TERMS_ACCEPTED_KEY = "kcr_terms_accepted";
+const PENDING_USER_CONSENT_KEY = "kcr_pending_user_consent_v1";
+const TERMS_VERSION = "2026-07-25";
+const REFUND_POLICY_VERSION = "2026-07-25";
+const USER_CONSENT_TEXT =
+  "I agree to the Terms of Use and Refund Policy.";
+
+type PendingUserConsent = {
+  termsVersion: string;
+  refundPolicyVersion: string;
+  consentText: string;
+  acceptedAtClient: string;
+  source: "acceptance_screen";
+};
+
+function readPendingUserConsent(): PendingUserConsent | null {
+  try {
+    const value = window.localStorage.getItem(PENDING_USER_CONSENT_KEY);
+
+    if (!value) {
+      return null;
+    }
+
+    const parsed = JSON.parse(value) as Partial<PendingUserConsent>;
+
+    if (
+      parsed.termsVersion !== TERMS_VERSION ||
+      parsed.refundPolicyVersion !== REFUND_POLICY_VERSION ||
+      parsed.consentText !== USER_CONSENT_TEXT ||
+      parsed.source !== "acceptance_screen" ||
+      typeof parsed.acceptedAtClient !== "string" ||
+      Number.isNaN(new Date(parsed.acceptedAtClient).getTime())
+    ) {
+      return null;
+    }
+
+    return parsed as PendingUserConsent;
+  } catch {
+    return null;
+  }
+}
+
+function clearLocalConsent(): void {
+  window.localStorage.removeItem(TERMS_ACCEPTED_KEY);
+  window.localStorage.removeItem(PENDING_USER_CONSENT_KEY);
+}
 
 const CONCEPT_FACET_LABELS: Record<string, string> = {
   object_or_system: "Object/system",
@@ -396,22 +444,8 @@ function KeywordResultCard({ keyword }: { keyword: KeywordClassification }) {
           background: "#ecfdf5",
         }}
       >
-        <strong style={{ color: "#065f46" }}>Why this keyword matters</strong>
-        <p
-          style={{
-            margin: 0,
-            padding: "0.65rem 0.75rem",
-            borderRadius: "0.65rem",
-            background: "#ffffff",
-            color: "#1f2937",
-            fontSize: "0.86rem",
-            lineHeight: 1.55,
-          }}
-        >
-          {keyword.reason}
-        </p>
-        <strong style={{ fontSize: "0.76rem", color: "#475569" }}>
-          Linked parts of the technical concept
+        <strong style={{ color: "#065f46" }}>
+          Why this keyword was selected
         </strong>
         <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem" }}>
           {conceptFacets.map((facet) => (
@@ -432,7 +466,7 @@ function KeywordResultCard({ keyword }: { keyword: KeywordClassification }) {
         </div>
         <div>
           <strong style={{ fontSize: "0.76rem", color: "#475569" }}>
-            Most relevant concept links
+            Technical-concept basis
           </strong>
           <ul style={{ margin: "0.3rem 0 0", paddingLeft: "1.25rem" }}>
             {conceptBasis.map((basis) => (
@@ -442,7 +476,7 @@ function KeywordResultCard({ keyword }: { keyword: KeywordClassification }) {
         </div>
         <div>
           <strong style={{ fontSize: "0.76rem", color: "#475569" }}>
-            Supporting wording from the input
+            Exact input evidence
           </strong>
           <div style={{ display: "grid", gap: "0.35rem", marginTop: "0.3rem" }}>
             {sourceEvidence.map((evidence) => (
@@ -461,6 +495,9 @@ function KeywordResultCard({ keyword }: { keyword: KeywordClassification }) {
               </blockquote>
             ))}
           </div>
+        </div>
+        <div style={{ fontSize: "0.82rem", lineHeight: 1.45 }}>
+          <strong>Selection rationale:</strong> {keyword.reason}
         </div>
       </section>
 
@@ -657,7 +694,7 @@ function LandingPage({ onAcceptTerms }: LandingPageProps) {
             checked={checked}
             onChange={(event) => setChecked(event.target.checked)}
           />
-          <span>I accept the Terms of Use.</span>
+          <span>{USER_CONSENT_TEXT}</span>
         </label>
 
         <button
@@ -924,10 +961,11 @@ function formatLocalExpirationDate(isoString: string | null): string {
 }
 
 export default function App() {
-  const TERMS_ACCEPTED_KEY = "kcr_terms_accepted";
-
   const [termsAccepted, setTermsAccepted] = useState<boolean>(() => {
-    return window.localStorage.getItem(TERMS_ACCEPTED_KEY) === "true";
+    return (
+      window.localStorage.getItem(TERMS_ACCEPTED_KEY) === "true" &&
+      readPendingUserConsent() !== null
+    );
   });
 
   const [session, setSession] = useState<Session | null>(null);
@@ -945,22 +983,47 @@ export default function App() {
   const [creditRefreshKey, setCreditRefreshKey] = useState(0);
   const [, setRemainingCreditsAfterAnalysis] = useState<number | null>(null);
   const [remainingCredits, setRemainingCredits] = useState<number | null>(null);
-  const [creditBalanceError, setCreditBalanceError] = useState(false);
   const [, setSelectedPlan] = useState<PlanId | null>(null);
   const [creditsExpireAt, setCreditsExpireAt] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [consentStatus, setConsentStatus] = useState<
+    "idle" | "recording" | "recorded" | "error"
+  >("idle");
+  const [consentRecordingError, setConsentRecordingError] = useState("");
+  const [consentRetryKey, setConsentRetryKey] = useState(0);
   const [currentRoute, setCurrentRoute] = useState<
-    "analysis" | "admin-user-activity"
+    | "analysis"
+    | "admin-user-activity"
+    | "admin-user-consents"
+    | "admin-package-purchases"
   >(() =>
-    window.location.hash === "#/admin/user-activity"
-      ? "admin-user-activity"
-      : "analysis",
+    window.location.hash === "#/admin/package-purchases"
+      ? "admin-package-purchases"
+      : window.location.hash === "#/admin/user-consents"
+        ? "admin-user-consents"
+        : window.location.hash === "#/admin/user-activity"
+          ? "admin-user-activity"
+          : "analysis",
   );
   const analyzeInFlightRef = useRef(false);
   const pendingAnalyzeRequestRef = useRef<PendingAnalysisRequest | null>(null);
   function handleAcceptTerms() {
+    const pendingConsent: PendingUserConsent = {
+      termsVersion: TERMS_VERSION,
+      refundPolicyVersion: REFUND_POLICY_VERSION,
+      consentText: USER_CONSENT_TEXT,
+      acceptedAtClient: new Date().toISOString(),
+      source: "acceptance_screen",
+    };
+
+    window.localStorage.setItem(
+      PENDING_USER_CONSENT_KEY,
+      JSON.stringify(pendingConsent),
+    );
     window.localStorage.setItem(TERMS_ACCEPTED_KEY, "true");
     setTermsAccepted(true);
+    setConsentStatus("idle");
+    setConsentRecordingError("");
   }
 
   useEffect(() => {
@@ -982,15 +1045,73 @@ export default function App() {
   useEffect(() => {
     function updateRoute() {
       setCurrentRoute(
-        window.location.hash === "#/admin/user-activity"
-          ? "admin-user-activity"
-          : "analysis",
+        window.location.hash === "#/admin/package-purchases"
+          ? "admin-package-purchases"
+          : window.location.hash === "#/admin/user-consents"
+            ? "admin-user-consents"
+            : window.location.hash === "#/admin/user-activity"
+              ? "admin-user-activity"
+              : "analysis",
       );
     }
 
     window.addEventListener("hashchange", updateRoute);
     return () => window.removeEventListener("hashchange", updateRoute);
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function recordConsent() {
+      if (!session || !termsAccepted) {
+        setConsentStatus("idle");
+        return;
+      }
+
+      const pendingConsent = readPendingUserConsent();
+
+      if (!pendingConsent) {
+        clearLocalConsent();
+        setTermsAccepted(false);
+        setConsentStatus("idle");
+        return;
+      }
+
+      setConsentStatus("recording");
+      setConsentRecordingError("");
+
+      const { error: recordError } = await supabase.rpc(
+        "record_user_consent",
+        {
+          p_terms_version: pendingConsent.termsVersion,
+          p_refund_policy_version: pendingConsent.refundPolicyVersion,
+          p_consent_text: pendingConsent.consentText,
+          p_accepted_at_client: pendingConsent.acceptedAtClient,
+          p_source: pendingConsent.source,
+        },
+      );
+
+      if (cancelled) {
+        return;
+      }
+
+      if (recordError) {
+        setConsentStatus("error");
+        setConsentRecordingError(
+          `Your consent could not be recorded securely: ${recordError.message}`,
+        );
+        return;
+      }
+
+      setConsentStatus("recorded");
+    }
+
+    void recordConsent();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.user.id, termsAccepted, consentRetryKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1035,7 +1156,6 @@ export default function App() {
       (nextPlan === "test" || nextPlan === "business")
     ) {
       setRemainingCredits(null);
-      setCreditBalanceError(false);
       setCreditRefreshKey((key) => key + 1);
       window.localStorage.removeItem("lastCheckoutPlan");
 
@@ -1055,7 +1175,6 @@ export default function App() {
     async function fetchCreditBalance() {
       if (!session) {
         setRemainingCredits(null);
-        setCreditBalanceError(false);
         setSelectedPlan(null);
         setCreditsExpireAt(null);
         return;
@@ -1073,8 +1192,7 @@ export default function App() {
 
       if (error) {
         console.error("Failed to fetch credit balance:", error);
-        setRemainingCredits(null);
-        setCreditBalanceError(true);
+        setRemainingCredits(0);
         setSelectedPlan(null);
         setCreditsExpireAt(null);
         return;
@@ -1082,7 +1200,6 @@ export default function App() {
 
       if (!data) {
         setRemainingCredits(0);
-        setCreditBalanceError(false);
         setSelectedPlan(null);
         setCreditsExpireAt(null);
         return;
@@ -1102,14 +1219,12 @@ export default function App() {
 
       if (remaining <= 0 || isExpired) {
         setRemainingCredits(0);
-        setCreditBalanceError(false);
         setSelectedPlan(null);
-        setCreditsExpireAt(expiresAt);
+        setCreditsExpireAt(null);
         return;
       }
 
       setRemainingCredits(remaining);
-      setCreditBalanceError(false);
       setSelectedPlan(planMode);
       setCreditsExpireAt(expiresAt);
     }
@@ -1282,8 +1397,8 @@ export default function App() {
           setResult(null);
           setRemainingCreditsAfterAnalysis(0);
           setRemainingCredits(0);
-          setCreditBalanceError(false);
           setSelectedPlan(null);
+          setCreditsExpireAt(null);
           return;
         }
 
@@ -1330,10 +1445,10 @@ export default function App() {
       clearPendingAnalysisRequest();
       setRemainingCreditsAfterAnalysis(data.remainingCredits);
       setRemainingCredits(data.remainingCredits);
-      setCreditBalanceError(false);
 
       if (data.remainingCredits <= 0) {
         setSelectedPlan(null);
+        setCreditsExpireAt(null);
       }
     } catch (analyzeError) {
       setError(asErrorMessage(analyzeError));
@@ -1372,9 +1487,12 @@ export default function App() {
     await supabase.auth.signOut();
     pendingAnalyzeRequestRef.current = null;
     clearPendingAnalysisRequest();
+    clearLocalConsent();
+    setTermsAccepted(false);
+    setConsentStatus("idle");
+    setConsentRecordingError("");
     setResult(null);
     setRemainingCredits(null);
-    setCreditBalanceError(false);
     setSelectedPlan(null);
     setCreditsExpireAt(null);
   }
@@ -1387,7 +1505,7 @@ export default function App() {
     );
   }
 
-  if (!session && !termsAccepted) {
+  if (!termsAccepted) {
     return <LandingPage onAcceptTerms={handleAcceptTerms} />;
   }
 
@@ -1449,9 +1567,80 @@ export default function App() {
     );
   }
 
+  if (consentStatus === "idle" || consentStatus === "recording") {
+    return (
+      <main className="shell">
+        <p className="status-card">Recording your policy acceptance securely…</p>
+      </main>
+    );
+  }
+
+  if (consentStatus === "error") {
+    return (
+      <main className="shell auth-shell">
+        <section className="card auth-card">
+          <p className="eyebrow">Consent recording required</p>
+          <h1>We could not finish sign-in</h1>
+          <p className="error" role="alert">
+            {consentRecordingError}
+          </p>
+          <p className="muted">
+            Run the user-consents Supabase migration, then retry. Analysis and
+            administrator access remain unavailable until the server confirms
+            the consent record.
+          </p>
+          <button
+            className="primary"
+            type="button"
+            onClick={() => setConsentRetryKey((key) => key + 1)}
+          >
+            Retry consent recording
+          </button>
+          <button
+            className="secondary"
+            type="button"
+            onClick={() => void handleSignOut()}
+          >
+            Sign out
+          </button>
+        </section>
+      </main>
+    );
+  }
+
   if (currentRoute === "admin-user-activity") {
     return (
       <UserActivityPage
+        administratorEmail={session.user.email}
+        onBack={() => {
+          window.location.hash = "";
+        }}
+        onSignOut={async () => {
+          window.location.hash = "";
+          await handleSignOut();
+        }}
+      />
+    );
+  }
+
+  if (currentRoute === "admin-user-consents") {
+    return (
+      <UserConsentsPage
+        administratorEmail={session.user.email}
+        onBack={() => {
+          window.location.hash = "";
+        }}
+        onSignOut={async () => {
+          window.location.hash = "";
+          await handleSignOut();
+        }}
+      />
+    );
+  }
+
+  if (currentRoute === "admin-package-purchases") {
+    return (
+      <UserPackagePurchasesPage
         administratorEmail={session.user.email}
         onBack={() => {
           window.location.hash = "";
@@ -1482,16 +1671,38 @@ export default function App() {
           </span>
           <div className="user-panel-actions">
             {isAdmin && (
-              <button
-                type="button"
-                className="secondary compact-button"
-                onClick={() => {
-                  window.location.hash = "#/admin/user-activity";
-                }}
-              >
-                <Settings aria-hidden="true" />
-                Admin
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="secondary compact-button"
+                  onClick={() => {
+                    window.location.hash = "#/admin/user-activity";
+                  }}
+                >
+                  <Settings aria-hidden="true" />
+                  Activity
+                </button>
+                <button
+                  type="button"
+                  className="secondary compact-button"
+                  onClick={() => {
+                    window.location.hash = "#/admin/user-consents";
+                  }}
+                >
+                  <ShieldCheck aria-hidden="true" />
+                  Consents
+                </button>
+                <button
+                  type="button"
+                  className="secondary compact-button"
+                  onClick={() => {
+                    window.location.hash = "#/admin/package-purchases";
+                  }}
+                >
+                  <Coins aria-hidden="true" />
+                  Purchases
+                </button>
+              </>
             )}
             <button
               type="button"
@@ -1525,68 +1736,44 @@ export default function App() {
             <li>Search-ready insights</li>
           </ol>
         </div>
-        <aside className="credit-summary" aria-label="Credit status">
-          <div className="credit-summary-heading">
-            <span className="credit-summary-icon" aria-hidden="true">
-              <ShieldCheck />
-            </span>
-            <span>
-              <strong>Analysis access</strong>
-              <small>
-                {creditBalanceError
-                  ? "Balance temporarily unavailable"
-                  : !creditsLoaded
-                    ? "Checking credit balance"
-                    : hasCredits
-                      ? "Active and ready"
-                      : "No active credits"}
-              </small>
-            </span>
-            <span className="status-dot">
-              {creditBalanceError
-                ? "Unavailable"
-                : !creditsLoaded
-                  ? "Loading"
-                  : hasCredits
-                    ? "Active"
-                    : "Empty"}
-            </span>
-          </div>
-          <div className="credit-stats">
-            <span className="user-detail">
-              <span className="stat-icon" aria-hidden="true">
-                <Coins />
+        {hasCredits && (
+          <aside className="credit-summary" aria-label="Credit status">
+            <div className="credit-summary-heading">
+              <span className="credit-summary-icon" aria-hidden="true">
+                <ShieldCheck />
               </span>
               <span>
-                <span className="user-detail-label">Remaining credits</span>
-                <strong>
-                  {creditBalanceError
-                    ? "Unavailable"
-                    : (remainingCredits ?? "Loading…")}
-                </strong>
+                <strong>Analysis access</strong>
+                <small>Active and ready</small>
               </span>
-            </span>
-            <span className="user-detail">
-              <span className="stat-icon" aria-hidden="true">
-                <Clock3 />
-              </span>
-              <span>
-                <span className="user-detail-label">
-                  Credit expiration date
+              <span className="status-dot">Active</span>
+            </div>
+            <div className="credit-stats">
+              <span className="user-detail">
+                <span className="stat-icon" aria-hidden="true">
+                  <Coins />
                 </span>
-                <strong>
-                  {creditBalanceError
-                    ? "Unavailable"
-                    : creditsExpireAt
-                      ? formatLocalExpirationDate(creditsExpireAt)
-                      : creditsLoaded
-                        ? "Not set"
-                        : "Loading…"}
-                </strong>
+                <span>
+                  <span className="user-detail-label">Remaining credits</span>
+                  <strong>{remainingCredits}</strong>
+                </span>
               </span>
-            </span>
-          </div>
-        </aside>
+              {creditsExpireAt && (
+                <span className="user-detail">
+                  <span className="stat-icon" aria-hidden="true">
+                    <Clock3 />
+                  </span>
+                  <span>
+                    <span className="user-detail-label">Expiration date</span>
+                    <strong>
+                      {formatLocalExpirationDate(creditsExpireAt)}
+                    </strong>
+                  </span>
+                </span>
+              )}
+            </div>
+          </aside>
+        )}
       </section>
       {showPurchaseCards && (
         <PricingPlans

@@ -3,6 +3,7 @@ import termsOfUseText from "./components/terms-of-use.txt?raw";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import UserActivityPage from "./pages/admin/UserActivityPage";
 import UserConsentsPage from "./pages/admin/UserConsentsPage";
+import ErrorLogsPage from "./pages/admin/ErrorLogsPage";
 import UserPackagePurchasesPage from "./pages/admin/UserPackagePurchasesPage";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./supabaseClient";
@@ -24,6 +25,7 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
+  TriangleAlert,
 } from "lucide-react";
 type PlanId = "test" | "business";
 const EXPECTED_ANALYSIS_SCHEMA_VERSION = "concept-rationale-v3";
@@ -995,9 +997,12 @@ export default function App() {
     | "analysis"
     | "admin-user-activity"
     | "admin-user-consents"
+    | "admin-error-logs"
     | "admin-package-purchases"
   >(() =>
-    window.location.hash === "#/admin/package-purchases"
+    window.location.hash === "#/admin/error-logs"
+      ? "admin-error-logs"
+      : window.location.hash === "#/admin/package-purchases"
       ? "admin-package-purchases"
       : window.location.hash === "#/admin/user-consents"
         ? "admin-user-consents"
@@ -1045,7 +1050,9 @@ export default function App() {
   useEffect(() => {
     function updateRoute() {
       setCurrentRoute(
-        window.location.hash === "#/admin/package-purchases"
+        window.location.hash === "#/admin/error-logs"
+          ? "admin-error-logs"
+          : window.location.hash === "#/admin/package-purchases"
           ? "admin-package-purchases"
           : window.location.hash === "#/admin/user-consents"
             ? "admin-user-consents"
@@ -1653,6 +1660,21 @@ export default function App() {
     );
   }
 
+  if (currentRoute === "admin-error-logs") {
+    return (
+      <ErrorLogsPage
+        administratorEmail={session.user.email}
+        onBack={() => {
+          window.location.hash = "";
+        }}
+        onSignOut={async () => {
+          window.location.hash = "";
+          await handleSignOut();
+        }}
+      />
+    );
+  }
+
   return (
     <main className="shell app-shell">
       <header className="app-header">
@@ -1701,6 +1723,16 @@ export default function App() {
                 >
                   <Coins aria-hidden="true" />
                   Purchases
+                </button>
+                <button
+                  type="button"
+                  className="secondary compact-button"
+                  onClick={() => {
+                    window.location.hash = "#/admin/error-logs";
+                  }}
+                >
+                  <TriangleAlert aria-hidden="true" />
+                  Errors
                 </button>
               </>
             )}

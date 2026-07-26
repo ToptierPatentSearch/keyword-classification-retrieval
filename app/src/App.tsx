@@ -16,6 +16,7 @@ import type {
 import { PricingPlans } from "./components/PricingPlans";
 import {
   ArrowRight,
+  ChevronDown,
   Clock3,
   Coins,
   Eraser,
@@ -988,6 +989,7 @@ export default function App() {
   const [, setSelectedPlan] = useState<PlanId | null>(null);
   const [creditsExpireAt, setCreditsExpireAt] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isAdminMenuOpen, setIsAdminMenuOpen] = useState(false);
   const [consentStatus, setConsentStatus] = useState<
     "idle" | "recording" | "recorded" | "error"
   >("idle");
@@ -1011,6 +1013,7 @@ export default function App() {
           : "analysis",
   );
   const analyzeInFlightRef = useRef(false);
+  const adminMenuRef = useRef<HTMLDivElement | null>(null);
   const pendingAnalyzeRequestRef = useRef<PendingAnalysisRequest | null>(null);
   function handleAcceptTerms() {
     const pendingConsent: PendingUserConsent = {
@@ -1144,6 +1147,36 @@ export default function App() {
       cancelled = true;
     };
   }, [session?.user.id]);
+
+  useEffect(() => {
+    if (!isAdminMenuOpen) {
+      return;
+    }
+
+    function closeAdminMenuOnOutsideClick(event: MouseEvent) {
+      if (
+        adminMenuRef.current &&
+        !adminMenuRef.current.contains(event.target as Node)
+      ) {
+        setIsAdminMenuOpen(false);
+      }
+    }
+
+    function closeAdminMenuOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsAdminMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", closeAdminMenuOnOutsideClick);
+    document.addEventListener("keydown", closeAdminMenuOnEscape);
+
+    return () => {
+      document.removeEventListener("mousedown", closeAdminMenuOnOutsideClick);
+      document.removeEventListener("keydown", closeAdminMenuOnEscape);
+    };
+  }, [isAdminMenuOpen]);
+
   useEffect(() => {
     if (!session) {
       return;
@@ -1491,6 +1524,7 @@ export default function App() {
   }
 
   async function handleSignOut() {
+    setIsAdminMenuOpen(false);
     await supabase.auth.signOut();
     pendingAnalyzeRequestRef.current = null;
     clearPendingAnalysisRequest();
@@ -1502,6 +1536,11 @@ export default function App() {
     setRemainingCredits(null);
     setSelectedPlan(null);
     setCreditsExpireAt(null);
+  }
+
+  function navigateToAdminPage(hash: string) {
+    setIsAdminMenuOpen(false);
+    window.location.hash = hash;
   }
 
   if (authLoading && !session) {
@@ -1693,48 +1732,71 @@ export default function App() {
           </span>
           <div className="user-panel-actions">
             {isAdmin && (
-              <>
+              <div className="admin-menu" ref={adminMenuRef}>
                 <button
                   type="button"
-                  className="secondary compact-button"
-                  onClick={() => {
-                    window.location.hash = "#/admin/user-activity";
-                  }}
+                  className={`secondary compact-button admin-menu-trigger${
+                    isAdminMenuOpen ? " is-open" : ""
+                  }`}
+                  aria-haspopup="true"
+                  aria-expanded={isAdminMenuOpen}
+                  aria-controls="administration-menu"
+                  onClick={() => setIsAdminMenuOpen((isOpen) => !isOpen)}
                 >
                   <Settings aria-hidden="true" />
-                  Activity
+                  Administration
+                  <ChevronDown
+                    className="admin-menu-chevron"
+                    aria-hidden="true"
+                  />
                 </button>
-                <button
-                  type="button"
-                  className="secondary compact-button"
-                  onClick={() => {
-                    window.location.hash = "#/admin/user-consents";
-                  }}
+
+                <div
+                  id="administration-menu"
+                  className="admin-menu-popover"
+                  aria-label="Administration pages"
+                  hidden={!isAdminMenuOpen}
                 >
-                  <ShieldCheck aria-hidden="true" />
-                  Consents
-                </button>
-                <button
-                  type="button"
-                  className="secondary compact-button"
-                  onClick={() => {
-                    window.location.hash = "#/admin/package-purchases";
-                  }}
-                >
-                  <Coins aria-hidden="true" />
-                  Purchases
-                </button>
-                <button
-                  type="button"
-                  className="secondary compact-button"
-                  onClick={() => {
-                    window.location.hash = "#/admin/error-logs";
-                  }}
-                >
-                  <TriangleAlert aria-hidden="true" />
-                  Errors
-                </button>
-              </>
+                  <button
+                    type="button"
+                    className="admin-menu-item"
+                    onClick={() =>
+                      navigateToAdminPage("#/admin/user-activity")
+                    }
+                  >
+                    <Settings aria-hidden="true" />
+                    Activity
+                  </button>
+                  <button
+                    type="button"
+                    className="admin-menu-item"
+                    onClick={() =>
+                      navigateToAdminPage("#/admin/user-consents")
+                    }
+                  >
+                    <ShieldCheck aria-hidden="true" />
+                    Consents
+                  </button>
+                  <button
+                    type="button"
+                    className="admin-menu-item"
+                    onClick={() =>
+                      navigateToAdminPage("#/admin/package-purchases")
+                    }
+                  >
+                    <Coins aria-hidden="true" />
+                    Purchases
+                  </button>
+                  <button
+                    type="button"
+                    className="admin-menu-item"
+                    onClick={() => navigateToAdminPage("#/admin/error-logs")}
+                  >
+                    <TriangleAlert aria-hidden="true" />
+                    Errors
+                  </button>
+                </div>
+              </div>
             )}
             <button
               type="button"

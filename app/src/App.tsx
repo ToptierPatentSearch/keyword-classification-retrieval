@@ -1902,7 +1902,7 @@ export default function App() {
                 belongs to the selected IPC/CPC area; an F-term aspect is
                 withheld unless its theme and FI scope both match. The route is
                 search guidance, not an official classification assignment;
-                review the current scope and hierarchy in J-PlatPat when using Japan Classification Insights.
+                confirm the current FI/F-term scope and hierarchy in J-PlatPat.
               </p>
             </div>
             <button

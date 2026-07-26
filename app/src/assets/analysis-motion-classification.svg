@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 420" role="img" aria-labelledby="title desc">
+  <title id="title">Animated classification routing</title>
+  <desc id="desc">A moving route progresses from IPC and CPC through FI to F-term search guidance.</desc>
+  <style>
+    .route { stroke-dasharray: 10 10; animation: route 1.1s linear infinite; }
+    .step { transform-box: fill-box; transform-origin: center; animation: activate 4.8s ease-in-out infinite; }
+    .step-2 { animation-delay: 1.6s; }
+    .step-3 { animation-delay: 3.2s; }
+    .progress { animation: progress 4.8s ease-in-out infinite; }
+    .status-dot { animation: blink 1.1s ease-in-out infinite; }
+    @keyframes route { to { stroke-dashoffset: -20; } }
+    @keyframes activate {
+      0%, 18%, 100% { transform: scale(1); filter: none; }
+      7%, 12% { transform: scale(1.045); filter: drop-shadow(0 7px 8px rgba(51, 65, 85, .16)); }
+    }
+    @keyframes progress {
+      0% { transform: scaleX(.05); }
+      75%, 100% { transform: scaleX(1); }
+    }
+    @keyframes blink {
+      0%, 100% { opacity: .35; }
+      50% { opacity: 1; }
+    }
+  </style>
+  <rect width="960" height="420" fill="#f8fafc"/>
+  <rect x="46" y="44" width="868" height="332" rx="24" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+  <text x="84" y="92" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#0f172a">CLASSIFICATION ROUTING</text>
+  <text x="84" y="120" font-family="Arial, sans-serif" font-size="14" fill="#64748b">Following catalog-backed hierarchy from broad area to precise Japanese search guidance</text>
+  <g font-family="Arial, sans-serif">
+    <rect x="730" y="78" width="142" height="30" rx="15" fill="#f5f3ff"/>
+    <circle class="status-dot" cx="750" cy="93" r="5" fill="#7c3aed"/>
+    <text x="766" y="98" font-size="12" font-weight="700" fill="#6d28d9">ROUTING</text>
+    <g class="step">
+      <rect x="106" y="178" width="190" height="108" rx="18" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="2"/>
+      <text x="201" y="214" text-anchor="middle" font-size="13" font-weight="700" fill="#6d28d9">STEP 1</text>
+      <text x="201" y="244" text-anchor="middle" font-size="21" font-weight="700" fill="#312e81">IPC / CPC</text>
+      <text x="201" y="268" text-anchor="middle" font-size="13" fill="#64748b">Technical area</text>
+    </g>
+    <path class="route" d="M312 232 H386" fill="none" stroke="#7c3aed" stroke-width="4" stroke-linecap="round"/>
+    <path d="M371 217 L388 232 L371 247" fill="none" stroke="#7c3aed" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <g class="step step-2">
+      <rect x="402" y="178" width="156" height="108" rx="18" fill="#ecfdf5" stroke="#22c55e" stroke-width="2"/>
+      <text x="480" y="214" text-anchor="middle" font-size="13" font-weight="700" fill="#15803d">STEP 2</text>
+      <text x="480" y="244" text-anchor="middle" font-size="23" font-weight="700" fill="#14532d">FI</text>
+      <text x="480" y="268" text-anchor="middle" font-size="13" fill="#64748b">Subdivision</text>
+    </g>
+    <path class="route" d="M574 232 H648" fill="none" stroke="#16a34a" stroke-width="4" stroke-linecap="round"/>
+    <path d="M633 217 L650 232 L633 247" fill="none" stroke="#16a34a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <g class="step step-3">
+      <rect x="664" y="178" width="190" height="108" rx="18" fill="#eff6ff" stroke="#3b82f6" stroke-width="2"/>
+      <text x="759" y="214" text-anchor="middle" font-size="13" font-weight="700" fill="#1d4ed8">STEP 3</text>
+      <text x="759" y="244" text-anchor="middle" font-size="21" font-weight="700" fill="#1e3a8a">F-TERM</text>
+      <text x="759" y="268" text-anchor="middle" font-size="13" fill="#64748b">Theme → aspect</text>
+    </g>
+  </g>
+  <rect x="256" y="320" width="448" height="32" rx="16" fill="#f1f5f9"/>
+  <g transform="translate(264 327)">
+    <rect width="432" height="5" rx="2.5" fill="#cbd5e1"/>
+    <rect class="progress" width="432" height="5" rx="2.5" fill="#6366f1" style="transform-origin:left center"/>
+  </g>
+  <text x="480" y="347" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" font-weight="700" fill="#475569">Catalog-backed route · unsupported links withheld</text>
+</svg>

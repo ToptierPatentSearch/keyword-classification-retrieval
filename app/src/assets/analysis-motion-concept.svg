@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 420" role="img" aria-labelledby="title desc">
+  <title id="title">Animated technical concept extraction</title>
+  <desc id="desc">Patent text is scanned and routed into a pulsing central technical concept.</desc>
+  <style>
+    .scan-line { animation: scan 2.8s ease-in-out infinite; }
+    .text-line { animation: read 2.8s ease-in-out infinite; }
+    .text-line:nth-of-type(2) { animation-delay: .22s; }
+    .text-line:nth-of-type(3) { animation-delay: .44s; }
+    .text-line:nth-of-type(4) { animation-delay: .66s; }
+    .text-line:nth-of-type(5) { animation-delay: .88s; }
+    .flow { stroke-dasharray: 12 12; animation: flow 1.15s linear infinite; }
+    .concept-ring { transform-box: fill-box; transform-origin: center; animation: breathe 2.4s ease-in-out infinite; }
+    .concept-core { transform-box: fill-box; transform-origin: center; animation: core 1.8s ease-in-out infinite; }
+    .status-dot { animation: blink 1.2s ease-in-out infinite; }
+    @keyframes scan {
+      0%, 10% { transform: translateY(0); opacity: 0; }
+      20% { opacity: 1; }
+      75% { transform: translateY(106px); opacity: 1; }
+      90%, 100% { transform: translateY(106px); opacity: 0; }
+    }
+    @keyframes read {
+      0%, 18% { fill: #cbd5e1; }
+      35%, 62% { fill: #4f46e5; }
+      82%, 100% { fill: #cbd5e1; }
+    }
+    @keyframes flow { to { stroke-dashoffset: -24; } }
+    @keyframes breathe {
+      0%, 100% { transform: scale(.96); opacity: .82; }
+      50% { transform: scale(1.04); opacity: 1; }
+    }
+    @keyframes core {
+      0%, 100% { transform: scale(.9); }
+      50% { transform: scale(1.12); }
+    }
+    @keyframes blink {
+      0%, 100% { opacity: .35; }
+      50% { opacity: 1; }
+    }
+  </style>
+  <rect width="960" height="420" fill="#f8fafc"/>
+  <rect x="46" y="44" width="868" height="332" rx="24" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+  <text x="84" y="92" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#0f172a">TECHNICAL CONCEPT EXTRACTION</text>
+  <text x="84" y="120" font-family="Arial, sans-serif" font-size="14" fill="#64748b">Reading the complete patent text before classification routing</text>
+  <g font-family="Arial, sans-serif">
+    <rect x="748" y="78" width="124" height="30" rx="15" fill="#eef2ff"/>
+    <circle class="status-dot" cx="768" cy="93" r="5" fill="#4f46e5"/>
+    <text x="784" y="98" font-size="12" font-weight="700" fill="#4338ca">SCANNING</text>
+  </g>
+  <rect x="88" y="154" width="310" height="162" rx="14" fill="#f1f5f9" stroke="#cbd5e1"/>
+  <rect x="108" y="170" width="270" height="22" rx="5" fill="#e0e7ff" opacity=".72"/>
+  <g>
+    <rect class="text-line" x="116" y="182" width="212" height="10" rx="5" fill="#cbd5e1"/>
+    <rect class="text-line" x="116" y="208" width="246" height="8" rx="4" fill="#cbd5e1"/>
+    <rect class="text-line" x="116" y="232" width="228" height="8" rx="4" fill="#cbd5e1"/>
+    <rect class="text-line" x="116" y="256" width="252" height="8" rx="4" fill="#cbd5e1"/>
+    <rect class="text-line" x="116" y="280" width="190" height="8" rx="4" fill="#cbd5e1"/>
+  </g>
+  <rect class="scan-line" x="106" y="178" width="274" height="4" rx="2" fill="#6366f1"/>
+  <path class="flow" d="M425 235 H520" fill="none" stroke="#6366f1" stroke-width="4" stroke-linecap="round"/>
+  <path d="M505 220 L522 235 L505 250" fill="none" stroke="#6366f1" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+  <g class="concept-ring">
+    <circle cx="677" cy="235" r="96" fill="#eef2ff" stroke="#6366f1" stroke-width="2"/>
+    <circle cx="677" cy="235" r="58" fill="#ffffff" stroke="#a5b4fc" stroke-width="2"/>
+  </g>
+  <circle class="concept-core" cx="677" cy="235" r="18" fill="#4f46e5"/>
+  <path d="M677 155 V194 M757 235 H718 M677 315 V276 M597 235 H636" stroke="#6366f1" stroke-width="3" stroke-linecap="round"/>
+  <text x="677" y="348" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="#334155">Common technical concept</text>
+</svg>

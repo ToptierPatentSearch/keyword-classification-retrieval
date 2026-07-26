@@ -22,7 +22,7 @@ Examples of acceptable input include:
 
 Do not input any of the following:
 	• Personal information of yourself or another person, unless strictly necessary
-	• Sensitive personal information, including health, biometric, criminal, financial, religious, political, or children’s     	  information
+	• Sensitive personal information, including health, biometric, criminal, financial, religious, political, or children’s information
 	• Passwords, API keys, access tokens, private keys, or authentication credentials
 	• Credit card numbers, bank account details, tax IDs, national IDs, passport numbers, or driver’s license numbers
 	• Trade secrets, unpublished invention disclosures, confidential client materials, or NDA-protected information

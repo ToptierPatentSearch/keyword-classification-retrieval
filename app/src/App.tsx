@@ -1825,7 +1825,7 @@ export default function App() {
           </p>
           <ol className="workflow-route" aria-label="Analysis workflow">
             <li>Technical concept</li>
-            <li>Patent Search Intelligence</li>
+            <li>Keyword &amp; Classification Mapping</li>
             <li>Precision refinement</li>
             <li>Search-ready insights</li>
           </ol>

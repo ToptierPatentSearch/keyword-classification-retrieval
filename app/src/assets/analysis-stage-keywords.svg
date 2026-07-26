@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 420" role="img" aria-labelledby="title desc">
+  <title id="title">Patent keyword mapping</title>
+  <desc id="desc">A restrained academic illustration of technical terms being organized into related patent-search keywords.</desc>
+  <rect width="960" height="420" fill="#f8fafc"/>
+  <rect x="46" y="44" width="868" height="332" rx="24" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+  <text x="84" y="92" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#0f172a">PATENT SEARCH INTELLIGENCE</text>
+  <text x="84" y="120" font-family="Arial, sans-serif" font-size="14" fill="#64748b">Organizing technically meaningful terms and retrieval language</text>
+  <circle cx="480" cy="230" r="58" fill="#ecfeff" stroke="#0891b2" stroke-width="2"/>
+  <text x="480" y="224" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" font-weight="700" fill="#164e63">CORE</text>
+  <text x="480" y="244" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" font-weight="700" fill="#164e63">CONCEPT</text>
+  <path d="M430 198 L318 152 M530 198 L642 152 M422 244 L290 268 M538 244 L670 268 M448 278 L388 326 M512 278 L572 326" stroke="#94a3b8" stroke-width="2"/>
+  <g font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="#334155">
+    <rect x="204" y="122" width="158" height="58" rx="14" fill="#f8fafc" stroke="#cbd5e1"/><text x="283" y="157" text-anchor="middle">Primary term</text>
+    <rect x="598" y="122" width="158" height="58" rx="14" fill="#f8fafc" stroke="#cbd5e1"/><text x="677" y="157" text-anchor="middle">Synonym</text>
+    <rect x="176" y="242" width="158" height="58" rx="14" fill="#f8fafc" stroke="#cbd5e1"/><text x="255" y="277" text-anchor="middle">Component</text>
+    <rect x="626" y="242" width="158" height="58" rx="14" fill="#f8fafc" stroke="#cbd5e1"/><text x="705" y="277" text-anchor="middle">Technical effect</text>
+    <rect x="310" y="310" width="158" height="48" rx="14" fill="#f8fafc" stroke="#cbd5e1"/><text x="389" y="340" text-anchor="middle">Search phrase</text>
+    <rect x="492" y="310" width="158" height="48" rx="14" fill="#f8fafc" stroke="#cbd5e1"/><text x="571" y="340" text-anchor="middle">Use context</text>
+  </g>
+</svg>

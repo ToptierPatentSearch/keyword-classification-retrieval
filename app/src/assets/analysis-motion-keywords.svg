@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 420" role="img" aria-labelledby="title desc">
+  <title id="title">Animated patent keyword mapping</title>
+  <desc id="desc">Search terms move through a network around a pulsing core technical concept.</desc>
+  <style>
+    .link { stroke-dasharray: 7 9; animation: travel 1.6s linear infinite; }
+    .core { transform-box: fill-box; transform-origin: center; animation: pulse 2.2s ease-in-out infinite; }
+    .node-a, .node-b { transform-box: fill-box; transform-origin: center; }
+    .node-a { animation: float-a 3s ease-in-out infinite; }
+    .node-b { animation: float-b 3.4s ease-in-out infinite; }
+    .signal { animation: signal 1.8s ease-in-out infinite; }
+    @keyframes travel { to { stroke-dashoffset: -32; } }
+    @keyframes pulse {
+      0%, 100% { transform: scale(.96); }
+      50% { transform: scale(1.06); }
+    }
+    @keyframes float-a {
+      0%, 100% { transform: translateY(-2px); }
+      50% { transform: translateY(4px); }
+    }
+    @keyframes float-b {
+      0%, 100% { transform: translateY(3px); }
+      50% { transform: translateY(-4px); }
+    }
+    @keyframes signal {
+      0%, 100% { opacity: .3; }
+      50% { opacity: 1; }
+    }
+  </style>
+  <rect width="960" height="420" fill="#f8fafc"/>
+  <rect x="46" y="44" width="868" height="332" rx="24" fill="#ffffff" stroke="#cbd5e1" stroke-width="2"/>
+  <text x="84" y="92" font-family="Arial, sans-serif" font-size="18" font-weight="700" fill="#0f172a">PATENT SEARCH INTELLIGENCE</text>
+  <text x="84" y="120" font-family="Arial, sans-serif" font-size="14" fill="#64748b">Organizing technically meaningful terms and retrieval language</text>
+  <g font-family="Arial, sans-serif">
+    <rect x="738" y="78" width="134" height="30" rx="15" fill="#ecfeff"/>
+    <circle class="signal" cx="758" cy="93" r="5" fill="#0891b2"/>
+    <text x="774" y="98" font-size="12" font-weight="700" fill="#0e7490">MAPPING</text>
+  </g>
+  <g fill="none" stroke="#94a3b8" stroke-width="2">
+    <path class="link" d="M430 198 L318 152"/>
+    <path class="link" d="M530 198 L642 152"/>
+    <path class="link" d="M422 244 L290 268"/>
+    <path class="link" d="M538 244 L670 268"/>
+    <path class="link" d="M448 278 L388 326"/>
+    <path class="link" d="M512 278 L572 326"/>
+  </g>
+  <g class="core">
+    <circle cx="480" cy="230" r="64" fill="#cffafe" opacity=".55"/>
+    <circle cx="480" cy="230" r="58" fill="#ecfeff" stroke="#0891b2" stroke-width="2"/>
+    <text x="480" y="224" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" font-weight="700" fill="#164e63">CORE</text>
+    <text x="480" y="244" text-anchor="middle" font-family="Arial, sans-serif" font-size="15" font-weight="700" fill="#164e63">CONCEPT</text>
+  </g>
+  <g font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="#334155">
+    <g class="node-a"><rect x="204" y="122" width="158" height="58" rx="14" fill="#f8fafc" stroke="#cbd5e1"/><text x="283" y="157" text-anchor="middle">Primary term</text></g>
+    <g class="node-b"><rect x="598" y="122" width="158" height="58" rx="14" fill="#f8fafc" stroke="#cbd5e1"/><text x="677" y="157" text-anchor="middle">Synonym</text></g>
+    <g class="node-b"><rect x="176" y="242" width="158" height="58" rx="14" fill="#f8fafc" stroke="#cbd5e1"/><text x="255" y="277" text-anchor="middle">Component</text></g>
+    <g class="node-a"><rect x="626" y="242" width="158" height="58" rx="14" fill="#f8fafc" stroke="#cbd5e1"/><text x="705" y="277" text-anchor="middle">Technical effect</text></g>
+    <g class="node-a"><rect x="310" y="310" width="158" height="48" rx="14" fill="#f8fafc" stroke="#cbd5e1"/><text x="389" y="340" text-anchor="middle">Search phrase</text></g>
+    <g class="node-b"><rect x="492" y="310" width="158" height="48" rx="14" fill="#f8fafc" stroke="#cbd5e1"/><text x="571" y="340" text-anchor="middle">Use context</text></g>
+  </g>
+  <circle r="5" fill="#0891b2"><animateMotion dur="1.8s" repeatCount="indefinite" path="M430 198 L318 152"/></circle>
+  <circle r="5" fill="#0891b2"><animateMotion dur="2.1s" repeatCount="indefinite" path="M530 198 L642 152"/></circle>
+  <circle r="5" fill="#0891b2"><animateMotion dur="2.3s" repeatCount="indefinite" path="M538 244 L670 268"/></circle>
+</svg>

@@ -210,6 +210,72 @@ textarea:focus {
   gap: 8px;
 }
 
+.admin-menu {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.admin-menu-trigger.is-open {
+  background: #dbe5f0;
+}
+
+.admin-menu-chevron {
+  transition: transform 160ms ease;
+}
+
+.admin-menu-trigger.is-open .admin-menu-chevron {
+  transform: rotate(180deg);
+}
+
+.admin-menu-popover {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 30;
+  display: grid;
+  gap: 3px;
+  min-width: 210px;
+  padding: 8px;
+  border: 1px solid rgba(148, 163, 184, 0.38);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.18);
+  backdrop-filter: blur(12px);
+}
+
+.admin-menu-popover[hidden] {
+  display: none;
+}
+
+.admin-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #24324a;
+  font-size: 0.82rem;
+  font-weight: 750;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.admin-menu-item:hover,
+.admin-menu-item:focus-visible {
+  background: #edf2f8;
+  color: #0b1f3a;
+}
+
+.admin-menu-item svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  color: #526176;
+}
+
 .user-detail {
   display: grid;
   gap: 2px;
@@ -1989,6 +2055,21 @@ select:focus-visible {
 
   .user-panel-actions .compact-button {
     flex: 1;
+  }
+
+  .admin-menu {
+    min-width: 0;
+    flex: 1;
+  }
+
+  .admin-menu-trigger {
+    width: 100%;
+  }
+
+  .admin-menu-popover {
+    right: auto;
+    left: 0;
+    width: min(240px, calc(100vw - 48px));
   }
 
   .workflow-route {

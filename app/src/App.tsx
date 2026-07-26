@@ -1684,7 +1684,7 @@ export default function App() {
           </span>
           <span className="brand-copy">
             <strong>Top-tier Patent Search</strong>
-            <span>Classification Intelligence</span>
+            <span>Patent Search Intelligence</span>
           </span>
         </div>
         <div className="user-panel">
@@ -1752,7 +1752,7 @@ export default function App() {
         <div className="hero-copy">
           <p className="eyebrow">
             <Sparkles aria-hidden="true" />
-            English / Japanese Patent Intelligence
+            Patent Search Intelligence
           </p>
           <h1 id="analysis-title">
             Keyword Extraction &amp; <span>Classification Analysis</span>
@@ -1763,7 +1763,7 @@ export default function App() {
           </p>
           <ol className="workflow-route" aria-label="Analysis workflow">
             <li>Technical concept</li>
-            <li>Classification intelligence</li>
+            <li>Patent Search Intelligence</li>
             <li>Precision refinement</li>
             <li>Search-ready insights</li>
           </ol>

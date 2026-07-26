@@ -1,0 +1,71 @@
+/*
+ * Analysis slideshow
+ *
+ * The existing loading status card in App.tsx is rendered only while patent
+ * analysis is in progress. This stylesheet turns that loading-only card into a
+ * visual slideshow without changing the analysis, credit, retry, or Supabase
+ * logic.
+ *
+ * Timing: 4 images x 5 seconds each = 20-second cycle.
+ * To change the per-image display period, change the animation duration below
+ * to: number of images x desired seconds per image.
+ */
+
+.app-shell > .status-card {
+  display: grid;
+  gap: 0.9rem;
+  align-items: center;
+  padding: 1rem;
+  text-align: center;
+}
+
+.app-shell > .status-card::before {
+  content: "";
+  display: block;
+  width: min(100%, 760px);
+  aspect-ratio: 16 / 7;
+  margin: 0 auto;
+  border: 1px solid rgba(100, 116, 139, 0.24);
+  border-radius: 0.9rem;
+  background-color: #f8fafc;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: cover;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+  animation: analysis-image-cycle 20s steps(1, end) infinite;
+}
+
+@keyframes analysis-image-cycle {
+  0%,
+  24.999% {
+    background-image: url("./assets/analysis-stage-concept.svg");
+  }
+
+  25%,
+  49.999% {
+    background-image: url("./assets/analysis-stage-keywords.svg");
+  }
+
+  50%,
+  74.999% {
+    background-image: url("./assets/analysis-stage-classification.svg");
+  }
+
+  75%,
+  100% {
+    background-image: url("./assets/analysis-stage-insights.svg");
+  }
+}
+
+@media (max-width: 640px) {
+  .app-shell > .status-card::before {
+    aspect-ratio: 4 / 3;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-shell > .status-card::before {
+    animation: none;
+    background-image: url("./assets/analysis-stage-concept.svg");
+  }
+}

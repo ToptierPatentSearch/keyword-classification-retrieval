@@ -190,6 +190,10 @@ export function PricingPlans({
 
           return (
             <article key={plan.id} className={`pricing-card pricing-card-${plan.theme}`}>
+              {plan.id === 'business' && (
+                <span className="pricing-plan-badge">{t.bestValue}</span>
+              )}
+
               <div className="pricing-card-hero">
                 <span className="pricing-icon" aria-hidden="true">
                   <PlanIcon strokeWidth={1.9} />
@@ -228,7 +232,7 @@ export function PricingPlans({
                 aria-label={isLoading ? t.loading(plan.credits) : t.buy(plan.credits, price)}
               >
                 <CreditCard aria-hidden="true" strokeWidth={2.2} />
-                {isLoading ? t.loading(plan.credits) : t.buy(plan.credits, price)}
+                <span>{isLoading ? t.loading(plan.credits) : t.buy(plan.credits, price)}</span>
               </button>
             </article>
           );

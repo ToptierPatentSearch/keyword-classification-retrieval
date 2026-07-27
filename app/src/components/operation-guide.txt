@@ -1,7 +1,7 @@
 
 1  Overview
 
-keyword-classification-retrieval (herein after referred to as app) is a web app that helps users classify, analyze, and retrieve keyword-related information. It is intended for research support, search preparation, technical organization, and productivity improvement.
+keyword-classification-retrieval (hereinafter referred to as app) is a web app that helps users classify, analyze, and retrieve keyword-related information. It is intended for research support, search preparation, technical organization, and productivity improvement.
 
 Typical use cases include:
 	• Organizing keywords by technical field
@@ -58,16 +58,13 @@ For better results, use clear and structured input.
 Recommended format:
 	• State the technical field.
 	• Provide a short description of the subject.
-	• List important keywords.
 	• Avoid unnecessary background text.
 	• Avoid private or confidential information.
-	• Use short paragraphs rather than extremely long blocks.
 
 Example:
 
 Technical field: wireless charging
 Purpose: classify keywords for prior-art search
-Keywords: coil alignment, magnetic coupling, foreign object detection, charging pad, power transfer efficiency
 
 6  Poor Input Examples
 
@@ -78,7 +75,6 @@ Avoid input such as:
 	• Personal data about customers or employees
 	• Source code containing API keys
 	• Text copied from a confidential client document
-	• Text intended to test or bypass system restrictions
 
 7  Result Review
 
@@ -98,7 +94,6 @@ Credits may still be consumed if:
 	• The user submits unsuitable input
 	• The result is not useful to the user
 	• The user closes the browser during processing
-	• The user repeats the same request
 	• The input causes an error after external processing has started
 
 Credits should not be consumed if the system rejects the request before processing begins. However, this may depend on the implementation.
@@ -136,12 +131,12 @@ Try refreshing the page, logging out and back in, or checking your credit status
 Result does not appear
 
 Possible causes:
-	• Input was too long
 	• Input violated the Input Limitations
 	• AI processing failed
 	• Network connection failed
 	• Credits were insufficient
 	• The external service was temporarily unavailable
+
 Try shortening the input and submitting again.
 
 10  Support

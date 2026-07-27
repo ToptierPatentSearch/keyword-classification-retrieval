@@ -73,8 +73,9 @@ export const messages = {
   en: {
     heading: 'Choose the Plan That Fits You',
     description: 'Purchase analysis credits and start using the tool immediately.',
-    testName: 'Trial Use',
+    testName: 'Test Use',
     businessName: 'Business Use',
+    bestValue: 'Best Value',
     testDescription: 'Try the tool with 2 analyses. Ideal for a quick test.',
     businessDescription: 'Enough analysis credits for business use. Suitable for ongoing work.',
     credits2: '2 analysis credits',
@@ -95,6 +96,7 @@ export const messages = {
     description: '分析クレジットを購入して、すぐにツールを使い始められます。',
     testName: 'テスト利用',
     businessName: 'ビジネス利用',
+    bestValue: 'おすすめ',
     testDescription: '2回分の分析でツールをお試しください。短時間のテストに最適です。',
     businessDescription: 'ビジネス用途に十分な分析回数です。継続的な作業に適しています。',
     credits2: '2回分の分析クレジット',

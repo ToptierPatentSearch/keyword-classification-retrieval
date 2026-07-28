@@ -1,0 +1,109 @@
+name: Apply keyword modifier normalization patch
+
+on:
+  push:
+    branches:
+      - agent/remove-quantity-keyword-modifiers
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/remove-quantity-keyword-modifiers
+          fetch-depth: 0
+
+      - name: Normalize keyword quantity modifiers
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('supabase/functions/analyze/index.ts')
+          text = path.read_text(encoding='utf-8')
+
+          anchor = '''function normalizeComparableText(value: string): string {
+            return value.normalize("NFKC").toLowerCase().replace(/\\s+/gu, " ").trim();
+          }
+          '''
+
+          helper = r'''
+
+          const LEADING_GENERIC_KEYWORD_MODIFIER =
+            /^(?:(?:a|an|the|each|every|either|neither|any|some|several|many|few|multiple|various|respective|corresponding)\s+)+/iu;
+          const LEADING_QUANTITY_OF_PHRASE =
+            /^(?:(?:a\s+)?plurality|pluralities|number|set|group|pair|series|sequence|collection)\s+of\s+/iu;
+          const LEADING_ENGLISH_COUNT = new RegExp(
+            "^(?:(?:at\\s+least|at\\s+most|more\\s+than|less\\s+than|no\\s+more\\s+than|no\\s+less\\s+than|approximately|about|around|up\\s+to)\\s+)?(?:\\d+(?:\\.\\d+)?(?:st|nd|rd|th)?|zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)(?:\\s+(?:or\\s+more|or\\s+fewer))?\\s+",
+            "iu",
+          );
+
+          function normalizeKeywordHeadTerm(value: string): string {
+            const original = value.normalize("NFKC").replace(/\s+/gu, " ").trim();
+            let normalized = original;
+
+            for (let pass = 0; pass < 4 && normalized; pass += 1) {
+              const previous = normalized;
+              normalized = normalized
+                .replace(LEADING_GENERIC_KEYWORD_MODIFIER, "")
+                .replace(LEADING_QUANTITY_OF_PHRASE, "")
+                .replace(LEADING_ENGLISH_COUNT, "")
+                .trim();
+
+              if (normalized === previous) break;
+            }
+
+            return normalized || original;
+          }
+          '''
+
+          if 'function normalizeKeywordHeadTerm(value: string): string' not in text:
+              if anchor not in text:
+                  raise SystemExit('normalizeComparableText anchor not found')
+              text = text.replace(anchor, anchor + helper, 1)
+
+          old_terms = '''      const normalizedTerm = String(keyword.normalized_term ?? "").trim();
+                const term = String(keyword.term ?? "").trim();'''
+          new_terms = '''      const rawNormalizedTerm = String(keyword.normalized_term ?? "").trim();
+                const rawTerm = String(keyword.term ?? "").trim();
+                const term = normalizeKeywordHeadTerm(rawTerm);
+                const normalizedTerm = normalizeKeywordHeadTerm(
+                  rawNormalizedTerm || term,
+                );'''
+
+          if old_terms in text:
+              text = text.replace(old_terms, new_terms, 1)
+          elif 'const rawNormalizedTerm = String(keyword.normalized_term ?? "").trim();' not in text:
+              raise SystemExit('keyword term normalization anchor not found')
+
+          old_prompt = '- Extract meaningful technical patent keywords and noun phrases; exclude stopwords, legal boilerplate, and generic verbs.'
+          new_prompt = '''- Extract meaningful technical patent keywords and noun phrases; exclude stopwords, legal boilerplate, and generic verbs.
+          - Keyword term and normalized_term must identify the core technical noun or technically essential noun phrase, not a quantity/determiner phrase. Remove leading articles, generic quantity modifiers, cardinal or ordinal numerals, and quantity expressions such as "plurality of", "one or more", "at least two", "multiple", "several", "first", and "second" when they only count or distinguish instances. Examples: "plurality of cars" -> "cars"; "two hoistways" -> "hoistways"; "first sensor" -> "sensor". Keep a modifier when removing it would change the technical identity, for example "optical sensor", "wireless charging", "3D printing", "5G antenna", or a hyphenated scientific term such as "two-photon microscopy".'''
+
+          if old_prompt in text and 'Keyword term and normalized_term must identify the core technical noun' not in text:
+              text = text.replace(old_prompt, new_prompt, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Verify examples and patch scope
+        shell: bash
+        run: |
+          grep -n "normalizeKeywordHeadTerm\|plurality of cars\|two hoistways" supabase/functions/analyze/index.ts
+          git diff --check
+
+      - name: Commit patch and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add supabase/functions/analyze/index.ts
+          git rm .github/workflows/apply-keyword-modifier-patch.yml
+          git commit -m "Normalize quantity modifiers in keywords"
+          git push origin HEAD:agent/remove-quantity-keyword-modifiers

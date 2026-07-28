@@ -96,6 +96,7 @@ interface ClassificationLookupContext {
   searchTerms: string[];
   rankingTerms: string[];
   contextAnchorTokens: string[];
+  keywordLexicalTerms: string[];
 }
 
 interface ClassificationRouteCode extends ClassificationCodeEvidence {
@@ -367,6 +368,7 @@ function jsonResponse(body: unknown, init: ResponseInit = {}) {
 type AnalysisAuditOutcome =
   | "started"
   | "ready"
+  | "replay"
   | "succeeded"
   | "failed"
   | "rejected";
@@ -1585,12 +1587,73 @@ const GENERIC_CLASSIFICATION_CONTEXT_TOKENS = new Set([
   "status",
 ]);
 
+function classificationTokenFamilyKey(token: string): string {
+  const normalized = token.normalize("NFKC").trim().toLowerCase();
+
+  if (!/^[a-z][a-z0-9-]*$/u.test(normalized) || normalized.length <= 3) {
+    return normalized;
+  }
+
+  if (normalized.endsWith("ies") && normalized.length > 4) {
+    return `${normalized.slice(0, -3)}y`;
+  }
+
+  if (
+    (normalized.endsWith("sses") ||
+      normalized.endsWith("ches") ||
+      normalized.endsWith("shes") ||
+      normalized.endsWith("xes") ||
+      normalized.endsWith("zes")) &&
+    normalized.length > 4
+  ) {
+    return normalized.slice(0, -2);
+  }
+
+  if (normalized.endsWith("s") && !normalized.endsWith("ss")) {
+    return normalized.slice(0, -1);
+  }
+
+  return normalized;
+}
+
+function keywordIdentityTokenKeys(keyword: KeywordClassification): Set<string> {
+  const keys = new Set<string>();
+  const addTokens = (tokens: string[]) => {
+    for (const token of tokens) {
+      const key = classificationTokenFamilyKey(token);
+      if (key) keys.add(key);
+    }
+  };
+
+  addTokens(technicalTokens(keyword.term));
+  addTokens(technicalTokens(keyword.normalized_term));
+
+  for (const synonym of keyword.synonyms) {
+    const tokens = technicalTokens(synonym);
+    if (tokens.length === 0) continue;
+
+    const latinTokens = tokens.filter((token) =>
+      /^[a-z][a-z0-9-]*$/u.test(token),
+    );
+
+    if (latinTokens.length > 0) {
+      // The head noun is part of the keyword identity. Domain modifiers such as
+      // "elevator" and "lift" remain eligible as independent context.
+      addTokens([latinTokens[latinTokens.length - 1]]);
+    } else if (tokens.length === 1) {
+      addTokens(tokens);
+    }
+  }
+
+  return keys;
+}
+
 function classificationContextAnchorTokens(
   keyword: KeywordClassification,
   technicalConcept: TechnicalInterpretation,
   neighboringTerms: string[],
 ): string[] {
-  const sourceKeywordTokens = new Set(technicalTokens(keyword.term));
+  const keywordIdentityKeys = keywordIdentityTokenKeys(keyword);
   const contextValues = [
     keyword.normalized_term,
     technicalConcept.object_or_system,
@@ -1603,12 +1666,15 @@ function classificationContextAnchorTokens(
 
   return Array.from(
     new Set(contextValues.flatMap((value) => technicalTokens(value))),
-  ).filter(
-    (token) =>
-      !sourceKeywordTokens.has(token) &&
+  ).filter((token) => {
+    const tokenKey = classificationTokenFamilyKey(token);
+    return (
+      Boolean(tokenKey) &&
+      !keywordIdentityKeys.has(tokenKey) &&
       !GENERIC_CLASSIFICATION_CONTEXT_TOKENS.has(token) &&
-      !/^\d+$/u.test(token),
-  );
+      !/^\d+$/u.test(token)
+    );
+  });
 }
 
 function candidateContextAnchorHits(
@@ -1650,6 +1716,27 @@ function candidatePassesContextGate(
   }
 
   return candidateContextAnchorHits(candidate, contextAnchorTokens).length > 0;
+}
+
+function hasKeywordLexicalSupport(
+  candidate: ClassificationCandidate,
+  keywordLexicalTerms: string[],
+): boolean {
+  const title = candidateTitle(candidate);
+
+  return keywordLexicalTerms.some((term) => {
+    const normalizedTerm = term.normalize("NFKC").trim().toLowerCase();
+    if (normalizedTerm && title.includes(normalizedTerm)) return true;
+
+    const tokens = technicalTokens(term).filter(
+      (token) => !GENERIC_CLASSIFICATION_CONTEXT_TOKENS.has(token),
+    );
+    if (tokens.length === 0) return false;
+
+    const tokenHits = tokens.filter((token) => title.includes(token)).length;
+    const coverage = tokenHits / tokens.length;
+    return tokens.length === 1 ? coverage === 1 : coverage >= 0.67;
+  });
 }
 
 function calculateCandidateMatchScore(
@@ -1714,6 +1801,7 @@ async function searchClassificationCandidates(
   system: CatalogClassificationSystem,
   contextTerms: string[],
   contextAnchorTokens: string[],
+  keywordLexicalTerms: string[],
 ): Promise<ClassificationCandidate[]> {
   const uniqueSearchTerms = Array.from(
     new Set(searchTerms.map((term) => term.trim()).filter(Boolean)),
@@ -1795,6 +1883,7 @@ async function searchClassificationCandidates(
     .filter(
       (candidate) =>
         (candidate.match_score ?? 0) >= 0.38 &&
+        hasKeywordLexicalSupport(candidate, keywordLexicalTerms) &&
         candidatePassesContextGate(
           candidate,
           contextAnchorTokens,
@@ -1817,6 +1906,13 @@ function buildClassificationLookupContext(
   neighboringTerms: string[],
 ): ClassificationLookupContext {
   const interpretation = technicalConcept;
+  const keywordLexicalTerms = Array.from(
+    new Set(
+      [keyword.normalized_term, keyword.term, ...keyword.synonyms]
+        .map((value) => value.trim())
+        .filter(Boolean),
+    ),
+  ).slice(0, 8);
   const contextualizedKeywordTerms = [
     `${interpretation.object_or_system} ${keyword.normalized_term}`,
     `${interpretation.object_or_system} ${keyword.term}`,
@@ -1826,9 +1922,7 @@ function buildClassificationLookupContext(
   const searchTerms = Array.from(
     new Set(
       [
-        keyword.normalized_term,
-        keyword.term,
-        ...keyword.synonyms,
+        ...keywordLexicalTerms,
         ...contextualizedKeywordTerms,
       ]
         .map((value) => value.trim())
@@ -1866,7 +1960,12 @@ function buildClassificationLookupContext(
     neighboringTerms,
   );
 
-  return { searchTerms, rankingTerms, contextAnchorTokens };
+  return {
+    searchTerms,
+    rankingTerms,
+    contextAnchorTokens,
+    keywordLexicalTerms,
+  };
 }
 
 function selectCandidates(
@@ -2279,6 +2378,7 @@ async function lookupAndRankClassifications(
           searchTerms,
           rankingTerms,
           contextAnchorTokens,
+          keywordLexicalTerms,
         } = buildClassificationLookupContext(
           keyword,
           result.technical_concept,
@@ -2292,6 +2392,7 @@ async function lookupAndRankClassifications(
             "IPC",
             rankingTerms,
             contextAnchorTokens,
+            keywordLexicalTerms,
           ),
           searchClassificationCandidates(
             adminClient,
@@ -2299,6 +2400,7 @@ async function lookupAndRankClassifications(
             "CPC",
             rankingTerms,
             contextAnchorTokens,
+            keywordLexicalTerms,
           ),
         ]);
 
@@ -2325,6 +2427,7 @@ async function lookupAndRankClassifications(
                 "FI",
                 rankingTerms,
                 contextAnchorTokens,
+                keywordLexicalTerms,
               )
             : [];
         const fiCandidates = rawFiCandidates
@@ -2457,7 +2560,7 @@ async function lookupAndRankClassifications(
 
     keyword.classification_reason =
       catalogBackedCount > 0
-        ? "Classification candidates were retrieved from Supabase, required both lexical support and an independent document-level technical-context anchor, and were ranked against the complete technical interpretation. No model-generated classification code was accepted."
+        ? "Classification candidates were retrieved from Supabase, required lexical keyword support plus an independent document-level technical-context anchor, and excluded singular/plural or synonym head-noun variants from satisfying that independent context gate. No model-generated classification code was accepted."
         : "No Supabase classification record passed the technical-context threshold. Classification codes were left empty rather than generated by AI.";
   }
 

@@ -1,0 +1,86 @@
+name: Fix classification context gate call sites
+
+on:
+  push:
+    branches:
+      - agent/context-gate-classifications
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/context-gate-classifications
+          fetch-depth: 0
+
+      - name: Pass context anchors into classification searches
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('supabase/functions/analyze/index.ts')
+          text = path.read_text(encoding='utf-8')
+
+          lookup_start = text.find('async function lookupAndRankClassifications(')
+          if lookup_start < 0:
+              raise SystemExit('lookupAndRankClassifications not found')
+          prefix = text[:lookup_start]
+          body = text[lookup_start:]
+
+          for system in ('IPC', 'CPC', 'FI'):
+              pattern = re.compile(
+                  rf'("{system}",\n(?P<indent>[ \t]+)rankingTerms,\n)(?P<close>[ \t]+\)[,]?)'
+              )
+
+              def repl(match):
+                  return (
+                      match.group(1)
+                      + match.group('indent')
+                      + 'contextAnchorTokens,\n'
+                      + match.group('close')
+                  )
+
+              body, count = pattern.subn(repl, body, count=1)
+              if count != 1:
+                  already = re.search(
+                      rf'"{system}",\n[ \t]+rankingTerms,\n[ \t]+contextAnchorTokens,',
+                      body,
+                  )
+                  if not already:
+                      raise SystemExit(f'{system} context-anchor call site not found')
+
+          text = prefix + body
+
+          for system in ('IPC', 'CPC', 'FI'):
+              if not re.search(
+                  rf'"{system}",\n[ \t]+rankingTerms,\n[ \t]+contextAnchorTokens,',
+                  text[lookup_start:],
+              ):
+                  raise SystemExit(f'{system} call still lacks contextAnchorTokens')
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Verify diff
+        shell: bash
+        run: |
+          grep -n -A7 -B2 '"IPC"\|"CPC"\|"FI"' supabase/functions/analyze/index.ts | grep -E 'IPC|CPC|FI|rankingTerms|contextAnchorTokens' || true
+          git diff --check
+
+      - name: Commit fix and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add supabase/functions/analyze/index.ts
+          git rm .github/workflows/fix-context-gate-call-sites.yml
+          git commit -m "Wire classification context anchors"
+          git push origin HEAD:agent/context-gate-classifications

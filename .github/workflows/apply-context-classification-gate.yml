@@ -1,0 +1,543 @@
+name: Apply classification context gate patch
+
+on:
+  push:
+    branches:
+      - agent/context-gate-classifications
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/context-gate-classifications
+          fetch-depth: 0
+
+      - name: Harden classification candidate ranking
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('supabase/functions/analyze/index.ts')
+          text = path.read_text(encoding='utf-8')
+
+          old_interface = '''interface ClassificationLookupContext {
+            searchTerms: string[];
+            rankingTerms: string[];
+          }'''
+          new_interface = '''interface ClassificationLookupContext {
+            searchTerms: string[];
+            rankingTerms: string[];
+            contextAnchorTokens: string[];
+          }'''
+          if old_interface in text:
+              text = text.replace(old_interface, new_interface, 1)
+          elif 'contextAnchorTokens: string[];' not in text:
+              raise SystemExit('ClassificationLookupContext anchor not found')
+
+          scoring_pattern = re.compile(
+              r'function calculateCandidateMatchScore\([\s\S]*?\n\}\n\nasync function searchClassificationCandidates\(',
+              re.MULTILINE,
+          )
+          scoring_replacement = r'''const GENERIC_CLASSIFICATION_CONTEXT_TOKENS = new Set([
+            "system",
+            "systems",
+            "device",
+            "devices",
+            "method",
+            "methods",
+            "apparatus",
+            "apparatuses",
+            "unit",
+            "units",
+            "component",
+            "components",
+            "element",
+            "elements",
+            "means",
+            "use",
+            "uses",
+            "using",
+            "include",
+            "includes",
+            "including",
+            "comprising",
+            "comprises",
+            "configured",
+            "technical",
+            "operation",
+            "operations",
+            "effect",
+            "effects",
+            "based",
+            "with",
+            "from",
+            "into",
+            "through",
+            "between",
+            "within",
+            "where",
+            "when",
+            "while",
+            "each",
+            "respective",
+            "corresponding",
+            "detect",
+            "detects",
+            "detected",
+            "move",
+            "moves",
+            "moving",
+            "travel",
+            "travels",
+            "monitor",
+            "monitors",
+            "monitoring",
+            "condition",
+            "conditions",
+            "status",
+          ]);
+
+          function classificationContextAnchorTokens(
+            keyword: KeywordClassification,
+            technicalConcept: TechnicalInterpretation,
+            neighboringTerms: string[],
+          ): string[] {
+            const sourceKeywordTokens = new Set(technicalTokens(keyword.term));
+            const contextValues = [
+              keyword.normalized_term,
+              technicalConcept.object_or_system,
+              technicalConcept.application_or_use,
+              ...technicalConcept.components,
+              ...keyword.concept_basis,
+              ...technicalConcept.context_terms,
+              ...neighboringTerms,
+            ];
+
+            return Array.from(
+              new Set(contextValues.flatMap((value) => technicalTokens(value))),
+            ).filter(
+              (token) =>
+                !sourceKeywordTokens.has(token) &&
+                !GENERIC_CLASSIFICATION_CONTEXT_TOKENS.has(token) &&
+                !/^\d+$/u.test(token),
+            );
+          }
+
+          function candidateContextAnchorHits(
+            candidate: ClassificationCandidate,
+            contextAnchorTokens: string[],
+          ): string[] {
+            const title = candidateTitle(candidate);
+            return contextAnchorTokens.filter((token) => title.includes(token));
+          }
+
+          function hasStrongMultiwordSearchSupport(
+            candidate: ClassificationCandidate,
+            searchTerms: string[],
+          ): boolean {
+            const title = candidateTitle(candidate);
+
+            return searchTerms.some((term) => {
+              const tokens = Array.from(
+                new Set(
+                  technicalTokens(term).filter(
+                    (token) => !GENERIC_CLASSIFICATION_CONTEXT_TOKENS.has(token),
+                  ),
+                ),
+              );
+
+              return (
+                tokens.length >= 2 && tokens.every((token) => title.includes(token))
+              );
+            });
+          }
+
+          function candidatePassesContextGate(
+            candidate: ClassificationCandidate,
+            contextAnchorTokens: string[],
+            searchTerms: string[],
+          ): boolean {
+            if (contextAnchorTokens.length === 0) {
+              return hasStrongMultiwordSearchSupport(candidate, searchTerms);
+            }
+
+            return candidateContextAnchorHits(candidate, contextAnchorTokens).length > 0;
+          }
+
+          function calculateCandidateMatchScore(
+            candidate: ClassificationCandidate,
+            searchTerms: string[],
+            rankingTerms: string[],
+            contextAnchorTokens: string[] = [],
+          ): number {
+            const title = candidateTitle(candidate);
+            const primarySearchTerm = searchTerms[0] ?? "";
+            const query = primarySearchTerm.normalize("NFKC").trim().toLowerCase();
+            const normalizedSearchTerms = searchTerms
+              .map((term) => term.normalize("NFKC").trim().toLowerCase())
+              .filter(Boolean);
+            const queryWords = Array.from(
+              new Set(normalizedSearchTerms.flatMap(technicalTokens)),
+            );
+            const queryWordSet = new Set(queryWords);
+            const contextWords = Array.from(
+              new Set(rankingTerms.flatMap(technicalTokens)),
+            ).filter((word) => !queryWordSet.has(word));
+            const anchorHits = candidateContextAnchorHits(
+              candidate,
+              contextAnchorTokens,
+            );
+            let score = Math.min(0.34, Number(candidate.similarity_score) || 0);
+
+            if (query && title.includes(query)) {
+              score += 0.12;
+            }
+
+            const exactPhraseHits = normalizedSearchTerms.filter(
+              (term) => term !== query && title.includes(term),
+            ).length;
+            score += Math.min(0.08, exactPhraseHits * 0.04);
+
+            const queryWordHits = queryWords.filter((word) =>
+              title.includes(word),
+            ).length;
+            const queryCoverage =
+              queryWords.length > 0 ? queryWordHits / queryWords.length : 0;
+            score += Math.min(0.14, queryCoverage * 0.14);
+
+            const contextHits = contextWords.filter((word) =>
+              title.includes(word),
+            ).length;
+            const contextCoverage =
+              contextWords.length > 0 ? contextHits / contextWords.length : 0;
+            score += Math.min(
+              0.1,
+              contextHits * 0.012 + contextCoverage * 0.05,
+            );
+
+            score += Math.min(0.24, anchorHits.length * 0.12);
+
+            return Math.max(0, Math.min(1, score));
+          }
+
+          async function searchClassificationCandidates('''
+          text, replaced = scoring_pattern.subn(
+              lambda _match: scoring_replacement,
+              text,
+              count=1,
+          )
+          if replaced != 1:
+              if 'function candidatePassesContextGate(' not in text:
+                  raise SystemExit('Candidate scoring block anchor not found')
+
+          search_pattern = re.compile(
+              r'async function searchClassificationCandidates\([\s\S]*?\n\}\n\nfunction buildClassificationLookupContext\(',
+              re.MULTILINE,
+          )
+          search_replacement = r'''async function searchClassificationCandidates(
+            adminClient: SupabaseClient,
+            searchTerms: string[],
+            system: CatalogClassificationSystem,
+            contextTerms: string[],
+            contextAnchorTokens: string[],
+          ): Promise<ClassificationCandidate[]> {
+            const uniqueSearchTerms = Array.from(
+              new Set(searchTerms.map((term) => term.trim()).filter(Boolean)),
+            ).slice(0, 8);
+            const candidatesByCode = new Map<string, ClassificationCandidate>();
+
+            for (const searchText of uniqueSearchTerms) {
+              const { data, error } = await adminClient.rpc(
+                "search_classification_titles",
+                {
+                  search_text: searchText,
+                  requested_systems: [system],
+                  result_limit: CLASSIFICATION_SEARCH_LIMIT,
+                },
+              );
+
+              if (error) {
+                throw new Error(`${system} candidate search failed: ${error.message}`);
+              }
+
+              for (const rawCandidate of data ?? []) {
+                const candidate = rawCandidate as ClassificationCandidate;
+                if (candidate.system !== system || !candidate.code) {
+                  continue;
+                }
+
+                const normalizedCode = normalizeClassificationCode(candidate.code);
+                const previous = candidatesByCode.get(normalizedCode);
+
+                if (
+                  !previous ||
+                  Number(candidate.similarity_score) > Number(previous.similarity_score)
+                ) {
+                  candidatesByCode.set(normalizedCode, candidate);
+                }
+              }
+            }
+
+            return Array.from(candidatesByCode.values())
+              .map((candidate) => {
+                const matchedTerms = uniqueSearchTerms.filter((term) => {
+                  const title = candidateTitle(candidate);
+                  const normalizedTerm = term.normalize("NFKC").trim().toLowerCase();
+                  const tokens = technicalTokens(term).filter(
+                    (token) => !GENERIC_CLASSIFICATION_CONTEXT_TOKENS.has(token),
+                  );
+
+                  if (normalizedTerm && title.includes(normalizedTerm)) {
+                    return true;
+                  }
+
+                  if (tokens.length === 0) {
+                    return false;
+                  }
+
+                  const tokenHits = tokens.filter((token) =>
+                    title.includes(token),
+                  ).length;
+                  const coverage = tokenHits / tokens.length;
+
+                  return tokens.length === 1 ? coverage === 1 : coverage >= 0.67;
+                });
+                const baseScore = calculateCandidateMatchScore(
+                  candidate,
+                  uniqueSearchTerms,
+                  contextTerms,
+                  contextAnchorTokens,
+                );
+
+                return {
+                  ...candidate,
+                  matched_terms: matchedTerms,
+                  match_score: Math.min(
+                    1,
+                    baseScore + Math.min(0.08, matchedTerms.length * 0.03),
+                  ),
+                };
+              })
+              .filter(
+                (candidate) =>
+                  (candidate.match_score ?? 0) >= 0.38 &&
+                  candidatePassesContextGate(
+                    candidate,
+                    contextAnchorTokens,
+                    uniqueSearchTerms,
+                  ),
+              )
+              .sort(
+                (a, b) =>
+                  (b.match_score ?? 0) - (a.match_score ?? 0) ||
+                  Number(b.similarity_score) - Number(a.similarity_score) ||
+                  (a.hierarchy_level ?? 999) - (b.hierarchy_level ?? 999) ||
+                  a.code.localeCompare(b.code),
+              )
+              .slice(0, CANDIDATES_PER_SYSTEM);
+          }
+
+          function buildClassificationLookupContext('''
+          text, replaced = search_pattern.subn(
+              lambda _match: search_replacement,
+              text,
+              count=1,
+          )
+          if replaced != 1:
+              if 'contextAnchorTokens: string[],' not in text:
+                  raise SystemExit('Classification candidate search block anchor not found')
+
+          lookup_pattern = re.compile(
+              r'function buildClassificationLookupContext\([\s\S]*?\n\}\n\nfunction selectCandidates\(',
+              re.MULTILINE,
+          )
+          lookup_replacement = r'''function buildClassificationLookupContext(
+            keyword: KeywordClassification,
+            technicalConcept: TechnicalInterpretation,
+            neighboringTerms: string[],
+          ): ClassificationLookupContext {
+            const interpretation = technicalConcept;
+            const contextualizedKeywordTerms = [
+              `${interpretation.object_or_system} ${keyword.normalized_term}`,
+              `${interpretation.object_or_system} ${keyword.term}`,
+              `${interpretation.application_or_use} ${keyword.normalized_term}`,
+            ];
+
+            const searchTerms = Array.from(
+              new Set(
+                [
+                  keyword.normalized_term,
+                  keyword.term,
+                  ...keyword.synonyms,
+                  ...contextualizedKeywordTerms,
+                ]
+                  .map((value) => value.trim())
+                  .filter(Boolean),
+              ),
+            ).slice(0, 8);
+
+            const rankingTerms = Array.from(
+              new Set(
+                [
+                  interpretation.object_or_system,
+                  interpretation.purpose_or_problem,
+                  interpretation.application_or_use,
+                  ...interpretation.components,
+                  ...keyword.concept_basis,
+                  ...interpretation.component_relationships,
+                  ...interpretation.material_or_composition,
+                  ...interpretation.manufacturing_or_processing_steps,
+                  interpretation.operation,
+                  ...interpretation.control_means,
+                  ...interpretation.controlled_variables,
+                  ...interpretation.operating_conditions,
+                  interpretation.technical_effect,
+                  ...interpretation.context_terms,
+                  ...interpretation.search_phrases,
+                  ...neighboringTerms,
+                ]
+                  .map((value) => value.trim())
+                  .filter(Boolean),
+              ),
+            );
+            const contextAnchorTokens = classificationContextAnchorTokens(
+              keyword,
+              interpretation,
+              neighboringTerms,
+            );
+
+            return { searchTerms, rankingTerms, contextAnchorTokens };
+          }
+
+          function selectCandidates('''
+          text, replaced = lookup_pattern.subn(
+              lambda _match: lookup_replacement,
+              text,
+              count=1,
+          )
+          if replaced != 1:
+              if 'return { searchTerms, rankingTerms, contextAnchorTokens };' not in text:
+                  raise SystemExit('Classification lookup context block anchor not found')
+
+          old_destructure = '''        const { searchTerms, rankingTerms } = buildClassificationLookupContext(
+                    keyword,
+                    result.technical_concept,
+                    contextTerms,
+                  );'''
+          new_destructure = '''        const {
+                    searchTerms,
+                    rankingTerms,
+                    contextAnchorTokens,
+                  } = buildClassificationLookupContext(
+                    keyword,
+                    result.technical_concept,
+                    contextTerms,
+                  );'''
+          if old_destructure in text:
+              text = text.replace(old_destructure, new_destructure, 1)
+          elif 'contextAnchorTokens,' not in text[text.find('lookupAndRankClassifications'):]:
+              raise SystemExit('Lookup context destructuring anchor not found')
+
+          call_replacements = [
+              (
+                  '''            "IPC",
+                        rankingTerms,
+                      ),''',
+                  '''            "IPC",
+                        rankingTerms,
+                        contextAnchorTokens,
+                      ),''',
+              ),
+              (
+                  '''            "CPC",
+                        rankingTerms,
+                      ),''',
+                  '''            "CPC",
+                        rankingTerms,
+                        contextAnchorTokens,
+                      ),''',
+              ),
+              (
+                  '''                "FI",
+                            rankingTerms,
+                          )''',
+                  '''                "FI",
+                            rankingTerms,
+                            contextAnchorTokens,
+                          )''',
+              ),
+          ]
+          for old_call, new_call in call_replacements:
+              if old_call in text:
+                  text = text.replace(old_call, new_call, 1)
+
+          old_reason = 'Classification candidates were retrieved from Supabase and ranked against the complete technical interpretation. No model-generated classification code was accepted.'
+          new_reason = 'Classification candidates were retrieved from Supabase, required both lexical support and an independent document-level technical-context anchor, and were ranked against the complete technical interpretation. No model-generated classification code was accepted.'
+          if old_reason in text:
+              text = text.replace(old_reason, new_reason, 1)
+
+          warning_anchor = '''  warning = appendWarning(
+            warning,
+            "The displayed route is enforced as technical concept → catalog-backed IPC/CPC area → linked FI subdivision → FI-scoped F-term theme/aspect. It is search guidance, not an official classification determination; confirm the current hierarchy and scope in J-PlatPat before relying on it.",
+          );'''
+          extra_warning = '''
+          warning = appendWarning(
+            warning,
+            "Classification titles that match only a keyword lexically are suppressed unless they also match an independent document-level technical-context anchor. Empty classification output is preferred to a weak cross-domain match.",
+          );'''
+          if warning_anchor in text and 'weak cross-domain match' not in text:
+              text = text.replace(warning_anchor, warning_anchor + extra_warning, 1)
+
+          required_markers = [
+              'contextAnchorTokens: string[];',
+              'function candidatePassesContextGate(',
+              'candidatePassesContextGate(',
+              'return { searchTerms, rankingTerms, contextAnchorTokens };',
+              'independent document-level technical-context anchor',
+          ]
+          missing = [marker for marker in required_markers if marker not in text]
+          if missing:
+              raise SystemExit(f'Missing expected markers after patch: {missing}')
+          if '||\n        candidateTitle(candidate).includes(primarySearchTerm.toLowerCase())' in text:
+              raise SystemExit('Exact-title threshold bypass remains in analyze function')
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Verify regression intent and diff
+        shell: bash
+        run: |
+          python - <<'PY'
+          def passes(title, anchors):
+              title = title.lower()
+              return any(anchor.lower() in title for anchor in anchors)
+
+          elevator_anchors = ["elevator", "hoistways", "doorway"]
+          assert not passes("for cars", elevator_anchors)
+          assert not passes("Cars", elevator_anchors)
+          assert passes("Control of empty elevator cars", elevator_anchors)
+          assert not passes("Shafts", elevator_anchors)
+          assert passes("specially adapted for elevator shafts", elevator_anchors)
+          assert not passes("using optical sensors, e.g. spectral photometrical oximeters", elevator_anchors)
+          PY
+          grep -n "candidatePassesContextGate\|contextAnchorTokens\|weak cross-domain match" supabase/functions/analyze/index.ts
+          git diff --check
+
+      - name: Commit patch and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add supabase/functions/analyze/index.ts
+          git rm .github/workflows/apply-context-classification-gate.yml
+          git commit -m "Require technical context for classification matches"
+          git push origin HEAD:agent/context-gate-classifications

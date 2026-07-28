@@ -757,6 +757,34 @@ function normalizeComparableText(value: string): string {
   return value.normalize("NFKC").toLowerCase().replace(/\s+/gu, " ").trim();
 }
 
+
+const LEADING_GENERIC_KEYWORD_MODIFIER =
+  /^(?:(?:a|an|the|each|every|either|neither|any|some|several|many|few|multiple|various|respective|corresponding)\s+)+/iu;
+const LEADING_QUANTITY_OF_PHRASE =
+  /^(?:(?:a\s+)?plurality|pluralities|number|set|group|pair|series|sequence|collection)\s+of\s+/iu;
+const LEADING_ENGLISH_COUNT = new RegExp(
+  "^(?:(?:at\\s+least|at\\s+most|more\\s+than|less\\s+than|no\\s+more\\s+than|no\\s+less\\s+than|approximately|about|around|up\\s+to)\\s+)?(?:\\d+(?:\\.\\d+)?(?:st|nd|rd|th)?|zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|billion|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)(?:\\s+(?:or\\s+more|or\\s+fewer))?\\s+",
+  "iu",
+);
+
+function normalizeKeywordHeadTerm(value: string): string {
+  const original = value.normalize("NFKC").replace(/\s+/gu, " ").trim();
+  let normalized = original;
+
+  for (let pass = 0; pass < 4 && normalized; pass += 1) {
+    const previous = normalized;
+    normalized = normalized
+      .replace(LEADING_GENERIC_KEYWORD_MODIFIER, "")
+      .replace(LEADING_QUANTITY_OF_PHRASE, "")
+      .replace(LEADING_ENGLISH_COUNT, "")
+      .trim();
+
+    if (normalized === previous) break;
+  }
+
+  return normalized || original;
+}
+
 function compactComparableText(value: string): string {
   return normalizeComparableText(value).replace(
     /[^a-z0-9\u3040-\u30ff\u3400-\u9fff]+/gu,
@@ -999,8 +1027,12 @@ function normalizeResult(
           ? keyword.classification_confidence
           : "low";
 
-      const normalizedTerm = String(keyword.normalized_term ?? "").trim();
-      const term = String(keyword.term ?? "").trim();
+      const rawNormalizedTerm = String(keyword.normalized_term ?? "").trim();
+      const rawTerm = String(keyword.term ?? "").trim();
+      const term = normalizeKeywordHeadTerm(rawTerm);
+      const normalizedTerm = normalizeKeywordHeadTerm(
+        rawNormalizedTerm || term,
+      );
       const excludedSynonyms = new Set(
         [term, normalizedTerm]
           .map((value) => value.normalize("NFKC").toLowerCase())
@@ -2322,6 +2354,7 @@ Return only structured JSON matching the schema.
 Tasks:
 - Detect whether the dominant input language is English (en) or Japanese (ja).
 - Extract meaningful technical patent keywords and noun phrases; exclude stopwords, legal boilerplate, and generic verbs.
+- Keyword term and normalized_term must identify the core technical noun or technically essential noun phrase, not a quantity/determiner phrase. Remove leading articles, generic quantity modifiers, cardinal or ordinal numerals, and quantity expressions such as "plurality of", "one or more", "at least two", "multiple", "several", "first", and "second" when they only count or distinguish instances. Examples: "plurality of cars" -> "cars"; "two hoistways" -> "hoistways"; "first sensor" -> "sensor". Keep a modifier when removing it would change the technical identity, for example "optical sensor", "wireless charging", "3D printing", "5G antenna", or a hyphenated scientific term such as "two-photon microscopy".
 - Normalize synonyms into a concise canonical normalized_term.
 - For every retrieved keyword, derive and return 1-8 contextually valid synonyms, abbreviations, alternative technical names, English/Japanese equivalents, or established retrieval variants. The synonyms array must never be empty and must not repeat term or normalized_term.
 - For Japanese input, preserve Japanese wording in term and use an English technical phrase in normalized_term whenever possible.

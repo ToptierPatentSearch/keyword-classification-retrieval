@@ -95,6 +95,7 @@ interface TechnicalInterpretation {
 interface ClassificationLookupContext {
   searchTerms: string[];
   rankingTerms: string[];
+  contextAnchorTokens: string[];
 }
 
 interface ClassificationRouteCode extends ClassificationCodeEvidence {
@@ -1525,47 +1526,184 @@ function technicalTokens(text: string): string[] {
   return Array.from(new Set([...latinTokens, ...japaneseBigrams]));
 }
 
+const GENERIC_CLASSIFICATION_CONTEXT_TOKENS = new Set([
+  "system",
+  "systems",
+  "device",
+  "devices",
+  "method",
+  "methods",
+  "apparatus",
+  "apparatuses",
+  "unit",
+  "units",
+  "component",
+  "components",
+  "element",
+  "elements",
+  "means",
+  "use",
+  "uses",
+  "using",
+  "include",
+  "includes",
+  "including",
+  "comprising",
+  "comprises",
+  "configured",
+  "technical",
+  "operation",
+  "operations",
+  "effect",
+  "effects",
+  "based",
+  "with",
+  "from",
+  "into",
+  "through",
+  "between",
+  "within",
+  "where",
+  "when",
+  "while",
+  "each",
+  "respective",
+  "corresponding",
+  "detect",
+  "detects",
+  "detected",
+  "move",
+  "moves",
+  "moving",
+  "travel",
+  "travels",
+  "monitor",
+  "monitors",
+  "monitoring",
+  "condition",
+  "conditions",
+  "status",
+]);
+
+function classificationContextAnchorTokens(
+  keyword: KeywordClassification,
+  technicalConcept: TechnicalInterpretation,
+  neighboringTerms: string[],
+): string[] {
+  const sourceKeywordTokens = new Set(technicalTokens(keyword.term));
+  const contextValues = [
+    keyword.normalized_term,
+    technicalConcept.object_or_system,
+    technicalConcept.application_or_use,
+    ...technicalConcept.components,
+    ...keyword.concept_basis,
+    ...technicalConcept.context_terms,
+    ...neighboringTerms,
+  ];
+
+  return Array.from(
+    new Set(contextValues.flatMap((value) => technicalTokens(value))),
+  ).filter(
+    (token) =>
+      !sourceKeywordTokens.has(token) &&
+      !GENERIC_CLASSIFICATION_CONTEXT_TOKENS.has(token) &&
+      !/^\d+$/u.test(token),
+  );
+}
+
+function candidateContextAnchorHits(
+  candidate: ClassificationCandidate,
+  contextAnchorTokens: string[],
+): string[] {
+  const title = candidateTitle(candidate);
+  return contextAnchorTokens.filter((token) => title.includes(token));
+}
+
+function hasStrongMultiwordSearchSupport(
+  candidate: ClassificationCandidate,
+  searchTerms: string[],
+): boolean {
+  const title = candidateTitle(candidate);
+
+  return searchTerms.some((term) => {
+    const tokens = Array.from(
+      new Set(
+        technicalTokens(term).filter(
+          (token) => !GENERIC_CLASSIFICATION_CONTEXT_TOKENS.has(token),
+        ),
+      ),
+    );
+
+    return (
+      tokens.length >= 2 && tokens.every((token) => title.includes(token))
+    );
+  });
+}
+
+function candidatePassesContextGate(
+  candidate: ClassificationCandidate,
+  contextAnchorTokens: string[],
+  searchTerms: string[],
+): boolean {
+  if (contextAnchorTokens.length === 0) {
+    return hasStrongMultiwordSearchSupport(candidate, searchTerms);
+  }
+
+  return candidateContextAnchorHits(candidate, contextAnchorTokens).length > 0;
+}
+
 function calculateCandidateMatchScore(
   candidate: ClassificationCandidate,
   searchTerms: string[],
   rankingTerms: string[],
+  contextAnchorTokens: string[] = [],
 ): number {
   const title = candidateTitle(candidate);
   const primarySearchTerm = searchTerms[0] ?? "";
-  const query = primarySearchTerm.trim().toLowerCase();
+  const query = primarySearchTerm.normalize("NFKC").trim().toLowerCase();
   const normalizedSearchTerms = searchTerms
     .map((term) => term.normalize("NFKC").trim().toLowerCase())
     .filter(Boolean);
   const queryWords = Array.from(
     new Set(normalizedSearchTerms.flatMap(technicalTokens)),
   );
+  const queryWordSet = new Set(queryWords);
   const contextWords = Array.from(
     new Set(rankingTerms.flatMap(technicalTokens)),
+  ).filter((word) => !queryWordSet.has(word));
+  const anchorHits = candidateContextAnchorHits(
+    candidate,
+    contextAnchorTokens,
   );
-  let score = Math.min(0.42, Number(candidate.similarity_score) || 0);
+  let score = Math.min(0.34, Number(candidate.similarity_score) || 0);
 
   if (query && title.includes(query)) {
-    score += 0.18;
+    score += 0.12;
   }
 
   const exactPhraseHits = normalizedSearchTerms.filter(
     (term) => term !== query && title.includes(term),
   ).length;
-  score += Math.min(0.1, exactPhraseHits * 0.05);
+  score += Math.min(0.08, exactPhraseHits * 0.04);
 
   const queryWordHits = queryWords.filter((word) =>
     title.includes(word),
   ).length;
   const queryCoverage =
     queryWords.length > 0 ? queryWordHits / queryWords.length : 0;
-  score += Math.min(0.16, queryCoverage * 0.16);
+  score += Math.min(0.14, queryCoverage * 0.14);
 
   const contextHits = contextWords.filter((word) =>
     title.includes(word),
   ).length;
   const contextCoverage =
     contextWords.length > 0 ? contextHits / contextWords.length : 0;
-  score += Math.min(0.14, contextHits * 0.018 + contextCoverage * 0.08);
+  score += Math.min(
+    0.1,
+    contextHits * 0.012 + contextCoverage * 0.05,
+  );
+
+  score += Math.min(0.24, anchorHits.length * 0.12);
 
   return Math.max(0, Math.min(1, score));
 }
@@ -1575,10 +1713,11 @@ async function searchClassificationCandidates(
   searchTerms: string[],
   system: CatalogClassificationSystem,
   contextTerms: string[],
+  contextAnchorTokens: string[],
 ): Promise<ClassificationCandidate[]> {
   const uniqueSearchTerms = Array.from(
     new Set(searchTerms.map((term) => term.trim()).filter(Boolean)),
-  ).slice(0, 5);
+  ).slice(0, 8);
   const candidatesByCode = new Map<string, ClassificationCandidate>();
 
   for (const searchText of uniqueSearchTerms) {
@@ -1613,22 +1752,35 @@ async function searchClassificationCandidates(
     }
   }
 
-  const primarySearchTerm = uniqueSearchTerms[0] ?? "";
-
   return Array.from(candidatesByCode.values())
     .map((candidate) => {
       const matchedTerms = uniqueSearchTerms.filter((term) => {
         const title = candidateTitle(candidate);
-        const tokens = technicalTokens(term);
-        return (
-          title.includes(term.toLowerCase()) ||
-          (tokens.length > 0 && tokens.some((token) => title.includes(token)))
+        const normalizedTerm = term.normalize("NFKC").trim().toLowerCase();
+        const tokens = technicalTokens(term).filter(
+          (token) => !GENERIC_CLASSIFICATION_CONTEXT_TOKENS.has(token),
         );
+
+        if (normalizedTerm && title.includes(normalizedTerm)) {
+          return true;
+        }
+
+        if (tokens.length === 0) {
+          return false;
+        }
+
+        const tokenHits = tokens.filter((token) =>
+          title.includes(token),
+        ).length;
+        const coverage = tokenHits / tokens.length;
+
+        return tokens.length === 1 ? coverage === 1 : coverage >= 0.67;
       });
       const baseScore = calculateCandidateMatchScore(
         candidate,
         uniqueSearchTerms,
         contextTerms,
+        contextAnchorTokens,
       );
 
       return {
@@ -1636,14 +1788,18 @@ async function searchClassificationCandidates(
         matched_terms: matchedTerms,
         match_score: Math.min(
           1,
-          baseScore + Math.min(0.12, matchedTerms.length * 0.04),
+          baseScore + Math.min(0.08, matchedTerms.length * 0.03),
         ),
       };
     })
     .filter(
       (candidate) =>
-        (candidate.match_score ?? 0) >= 0.38 ||
-        candidateTitle(candidate).includes(primarySearchTerm.toLowerCase()),
+        (candidate.match_score ?? 0) >= 0.38 &&
+        candidatePassesContextGate(
+          candidate,
+          contextAnchorTokens,
+          uniqueSearchTerms,
+        ),
     )
     .sort(
       (a, b) =>
@@ -1661,20 +1817,10 @@ function buildClassificationLookupContext(
   neighboringTerms: string[],
 ): ClassificationLookupContext {
   const interpretation = technicalConcept;
-  const composedPhrases = [
-    `${interpretation.object_or_system} ${interpretation.purpose_or_problem}`,
-    `${interpretation.object_or_system} ${interpretation.application_or_use}`,
-    `${interpretation.object_or_system} ${interpretation.operation}`,
-    `${interpretation.object_or_system} ${interpretation.technical_effect}`,
-    ...interpretation.components.map(
-      (component) => `${interpretation.object_or_system} ${component}`,
-    ),
-    ...interpretation.component_relationships,
-    ...interpretation.material_or_composition,
-    ...interpretation.manufacturing_or_processing_steps,
-    ...interpretation.control_means,
-    ...interpretation.controlled_variables,
-    ...interpretation.operating_conditions,
+  const contextualizedKeywordTerms = [
+    `${interpretation.object_or_system} ${keyword.normalized_term}`,
+    `${interpretation.object_or_system} ${keyword.term}`,
+    `${interpretation.application_or_use} ${keyword.normalized_term}`,
   ];
 
   const searchTerms = Array.from(
@@ -1683,9 +1829,7 @@ function buildClassificationLookupContext(
         keyword.normalized_term,
         keyword.term,
         ...keyword.synonyms,
-        ...interpretation.search_phrases,
-        ...composedPhrases,
-        ...interpretation.context_terms,
+        ...contextualizedKeywordTerms,
       ]
         .map((value) => value.trim())
         .filter(Boolean),
@@ -1695,14 +1839,11 @@ function buildClassificationLookupContext(
   const rankingTerms = Array.from(
     new Set(
       [
-        ...searchTerms,
-        keyword.normalized_term,
-        keyword.term,
-        ...keyword.synonyms,
         interpretation.object_or_system,
         interpretation.purpose_or_problem,
         interpretation.application_or_use,
         ...interpretation.components,
+        ...keyword.concept_basis,
         ...interpretation.component_relationships,
         ...interpretation.material_or_composition,
         ...interpretation.manufacturing_or_processing_steps,
@@ -1719,8 +1860,13 @@ function buildClassificationLookupContext(
         .filter(Boolean),
     ),
   );
+  const contextAnchorTokens = classificationContextAnchorTokens(
+    keyword,
+    interpretation,
+    neighboringTerms,
+  );
 
-  return { searchTerms, rankingTerms };
+  return { searchTerms, rankingTerms, contextAnchorTokens };
 }
 
 function selectCandidates(
@@ -2129,7 +2275,11 @@ async function lookupAndRankClassifications(
       keywordIndexes.map(async (keywordIndex) => {
         const keyword = enrichedKeywords[keywordIndex];
 
-        const { searchTerms, rankingTerms } = buildClassificationLookupContext(
+        const {
+          searchTerms,
+          rankingTerms,
+          contextAnchorTokens,
+        } = buildClassificationLookupContext(
           keyword,
           result.technical_concept,
           contextTerms,
@@ -2304,7 +2454,7 @@ async function lookupAndRankClassifications(
 
     keyword.classification_reason =
       catalogBackedCount > 0
-        ? "Classification candidates were retrieved from Supabase and ranked against the complete technical interpretation. No model-generated classification code was accepted."
+        ? "Classification candidates were retrieved from Supabase, required both lexical support and an independent document-level technical-context anchor, and were ranked against the complete technical interpretation. No model-generated classification code was accepted."
         : "No Supabase classification record passed the technical-context threshold. Classification codes were left empty rather than generated by AI.";
   }
 

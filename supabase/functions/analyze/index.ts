@@ -368,6 +368,7 @@ function jsonResponse(body: unknown, init: ResponseInit = {}) {
 type AnalysisAuditOutcome =
   | "started"
   | "ready"
+  | "replay"
   | "succeeded"
   | "failed"
   | "rejected";
@@ -2426,7 +2427,7 @@ async function lookupAndRankClassifications(
                 "FI",
                 rankingTerms,
                 contextAnchorTokens,
-            keywordLexicalTerms,
+                keywordLexicalTerms,
               )
             : [];
         const fiCandidates = rawFiCandidates

@@ -1,0 +1,51 @@
+name: Trigger keyword identity context gate on PR
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.head_ref == 'agent/keyword-identity-context-gate' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout patch branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/keyword-identity-context-gate
+          fetch-depth: 0
+
+      - name: Run patch embedded in one-time workflow
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          workflow = Path('.github/workflows/apply-keyword-identity-context-gate.yml').read_text(encoding='utf-8')
+          start_marker = "          python - <<'PY'\n"
+          end_marker = "\n          PY\n\n      - name: Verify patch"
+          start = workflow.index(start_marker) + len(start_marker)
+          end = workflow.index(end_marker, start)
+          script = textwrap.dedent(workflow[start:end])
+          exec(compile(script, 'embedded-keyword-identity-patch.py', 'exec'), {'__name__': '__main__'})
+          PY
+
+      - name: Verify and commit only product change
+        shell: bash
+        run: |
+          grep -n "keywordIdentityTokenKeys\|classificationTokenFamilyKey\|hasKeywordLexicalSupport\|keywordLexicalTerms" supabase/functions/analyze/index.ts
+          git diff --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add supabase/functions/analyze/index.ts
+          git rm -f .github/workflows/apply-keyword-identity-context-gate.yml
+          git rm -f .github/workflows/trigger-keyword-identity-context-gate-pr.yml
+          git rm -f .github/.trigger-keyword-identity-context-gate
+          git commit -m "Exclude keyword identity from classification context"
+          git push origin HEAD:agent/keyword-identity-context-gate

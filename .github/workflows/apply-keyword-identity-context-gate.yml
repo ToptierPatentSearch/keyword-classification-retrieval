@@ -1,0 +1,351 @@
+name: Apply keyword identity context gate
+
+on:
+  push:
+    branches:
+      - agent/keyword-identity-context-gate
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/keyword-identity-context-gate
+          fetch-depth: 0
+
+      - name: Harden classification context gate
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('supabase/functions/analyze/index.ts')
+          text = path.read_text(encoding='utf-8')
+
+          old_interface = '''interface ClassificationLookupContext {
+            searchTerms: string[];
+            rankingTerms: string[];
+            contextAnchorTokens: string[];
+          }'''
+          new_interface = '''interface ClassificationLookupContext {
+            searchTerms: string[];
+            rankingTerms: string[];
+            contextAnchorTokens: string[];
+            keywordLexicalTerms: string[];
+          }'''
+          if old_interface in text:
+              text = text.replace(old_interface, new_interface, 1)
+          elif 'keywordLexicalTerms: string[];' not in text:
+              raise SystemExit('ClassificationLookupContext anchor not found')
+
+          old_context = '''function classificationContextAnchorTokens(
+            keyword: KeywordClassification,
+            technicalConcept: TechnicalInterpretation,
+            neighboringTerms: string[],
+          ): string[] {
+            const sourceKeywordTokens = new Set(technicalTokens(keyword.term));
+            const contextValues = [
+              keyword.normalized_term,
+              technicalConcept.object_or_system,
+              technicalConcept.application_or_use,
+              ...technicalConcept.components,
+              ...keyword.concept_basis,
+              ...technicalConcept.context_terms,
+              ...neighboringTerms,
+            ];
+
+            return Array.from(
+              new Set(contextValues.flatMap((value) => technicalTokens(value))),
+            ).filter(
+              (token) =>
+                !sourceKeywordTokens.has(token) &&
+                !GENERIC_CLASSIFICATION_CONTEXT_TOKENS.has(token) &&
+                !/^\\d+$/u.test(token),
+            );
+          }'''
+          new_context = '''function classificationTokenFamilyKey(token: string): string {
+            const normalized = token.normalize("NFKC").trim().toLowerCase();
+
+            if (!/^[a-z][a-z0-9-]*$/u.test(normalized) || normalized.length <= 3) {
+              return normalized;
+            }
+
+            if (normalized.endsWith("ies") && normalized.length > 4) {
+              return `${normalized.slice(0, -3)}y`;
+            }
+
+            if (
+              (normalized.endsWith("sses") ||
+                normalized.endsWith("ches") ||
+                normalized.endsWith("shes") ||
+                normalized.endsWith("xes") ||
+                normalized.endsWith("zes")) &&
+              normalized.length > 4
+            ) {
+              return normalized.slice(0, -2);
+            }
+
+            if (normalized.endsWith("s") && !normalized.endsWith("ss")) {
+              return normalized.slice(0, -1);
+            }
+
+            return normalized;
+          }
+
+          function keywordIdentityTokenKeys(keyword: KeywordClassification): Set<string> {
+            const keys = new Set<string>();
+            const addTokens = (tokens: string[]) => {
+              for (const token of tokens) {
+                const key = classificationTokenFamilyKey(token);
+                if (key) keys.add(key);
+              }
+            };
+
+            addTokens(technicalTokens(keyword.term));
+            addTokens(technicalTokens(keyword.normalized_term));
+
+            for (const synonym of keyword.synonyms) {
+              const tokens = technicalTokens(synonym);
+              if (tokens.length === 0) continue;
+
+              const latinTokens = tokens.filter((token) =>
+                /^[a-z][a-z0-9-]*$/u.test(token),
+              );
+
+              if (latinTokens.length > 0) {
+                // Treat the head noun as keyword identity, while retaining domain
+                // modifiers such as "elevator" or "lift" as possible context.
+                addTokens([latinTokens[latinTokens.length - 1]]);
+              } else if (tokens.length === 1) {
+                addTokens(tokens);
+              }
+            }
+
+            return keys;
+          }
+
+          function classificationContextAnchorTokens(
+            keyword: KeywordClassification,
+            technicalConcept: TechnicalInterpretation,
+            neighboringTerms: string[],
+          ): string[] {
+            const keywordIdentityKeys = keywordIdentityTokenKeys(keyword);
+            const contextValues = [
+              keyword.normalized_term,
+              technicalConcept.object_or_system,
+              technicalConcept.application_or_use,
+              ...technicalConcept.components,
+              ...keyword.concept_basis,
+              ...technicalConcept.context_terms,
+              ...neighboringTerms,
+            ];
+
+            return Array.from(
+              new Set(contextValues.flatMap((value) => technicalTokens(value))),
+            ).filter((token) => {
+              const tokenKey = classificationTokenFamilyKey(token);
+              return (
+                Boolean(tokenKey) &&
+                !keywordIdentityKeys.has(tokenKey) &&
+                !GENERIC_CLASSIFICATION_CONTEXT_TOKENS.has(token) &&
+                !/^\\d+$/u.test(token)
+              );
+            });
+          }'''
+          if old_context in text:
+              text = text.replace(old_context, new_context, 1)
+          elif 'function keywordIdentityTokenKeys(' not in text:
+              raise SystemExit('classificationContextAnchorTokens anchor not found')
+
+          lexical_helper_anchor = '''function candidatePassesContextGate(
+            candidate: ClassificationCandidate,
+            contextAnchorTokens: string[],
+            searchTerms: string[],
+          ): boolean {
+            if (contextAnchorTokens.length === 0) {
+              return hasStrongMultiwordSearchSupport(candidate, searchTerms);
+            }
+
+            return candidateContextAnchorHits(candidate, contextAnchorTokens).length > 0;
+          }
+          '''
+          lexical_helper = '''
+          function hasKeywordLexicalSupport(
+            candidate: ClassificationCandidate,
+            keywordLexicalTerms: string[],
+          ): boolean {
+            const title = candidateTitle(candidate);
+
+            return keywordLexicalTerms.some((term) => {
+              const normalizedTerm = term.normalize("NFKC").trim().toLowerCase();
+              if (normalizedTerm && title.includes(normalizedTerm)) return true;
+
+              const tokens = technicalTokens(term).filter(
+                (token) => !GENERIC_CLASSIFICATION_CONTEXT_TOKENS.has(token),
+              );
+              if (tokens.length === 0) return false;
+
+              const tokenHits = tokens.filter((token) => title.includes(token)).length;
+              const coverage = tokenHits / tokens.length;
+              return tokens.length === 1 ? coverage === 1 : coverage >= 0.67;
+            });
+          }
+          '''
+          if 'function hasKeywordLexicalSupport(' not in text:
+              if lexical_helper_anchor not in text:
+                  raise SystemExit('candidatePassesContextGate anchor not found')
+              text = text.replace(lexical_helper_anchor, lexical_helper_anchor + lexical_helper, 1)
+
+          old_signature = '''async function searchClassificationCandidates(
+            adminClient: SupabaseClient,
+            searchTerms: string[],
+            system: CatalogClassificationSystem,
+            contextTerms: string[],
+            contextAnchorTokens: string[],
+          ): Promise<ClassificationCandidate[]> {'''
+          new_signature = '''async function searchClassificationCandidates(
+            adminClient: SupabaseClient,
+            searchTerms: string[],
+            system: CatalogClassificationSystem,
+            contextTerms: string[],
+            contextAnchorTokens: string[],
+            keywordLexicalTerms: string[],
+          ): Promise<ClassificationCandidate[]> {'''
+          if old_signature in text:
+              text = text.replace(old_signature, new_signature, 1)
+          elif 'keywordLexicalTerms: string[],' not in text[text.index('async function searchClassificationCandidates('):text.index('async function searchClassificationCandidates(')+450]:
+              raise SystemExit('searchClassificationCandidates signature anchor not found')
+
+          filter_anchor = '''    .filter(
+              (candidate) =>
+                (candidate.match_score ?? 0) >= 0.38 &&
+                candidatePassesContextGate(
+                  candidate,
+                  contextAnchorTokens,
+                  uniqueSearchTerms,
+                ),
+            )'''
+          filter_replacement = '''    .filter(
+              (candidate) =>
+                (candidate.match_score ?? 0) >= 0.38 &&
+                hasKeywordLexicalSupport(candidate, keywordLexicalTerms) &&
+                candidatePassesContextGate(
+                  candidate,
+                  contextAnchorTokens,
+                  uniqueSearchTerms,
+                ),
+            )'''
+          if filter_anchor in text:
+              text = text.replace(filter_anchor, filter_replacement, 1)
+          elif 'hasKeywordLexicalSupport(candidate, keywordLexicalTerms)' not in text:
+              raise SystemExit('candidate filter anchor not found')
+
+          old_build_start = '''  const contextualizedKeywordTerms = [
+            `${interpretation.object_or_system} ${keyword.normalized_term}`,
+            `${interpretation.object_or_system} ${keyword.term}`,
+            `${interpretation.application_or_use} ${keyword.normalized_term}`,
+          ];
+
+          const searchTerms = Array.from(
+            new Set(
+              [
+                keyword.normalized_term,
+                keyword.term,
+                ...keyword.synonyms,
+                ...contextualizedKeywordTerms,
+              ]'''
+          new_build_start = '''  const keywordLexicalTerms = Array.from(
+            new Set(
+              [keyword.normalized_term, keyword.term, ...keyword.synonyms]
+                .map((value) => value.trim())
+                .filter(Boolean),
+            ),
+          ).slice(0, 8);
+          const contextualizedKeywordTerms = [
+            `${interpretation.object_or_system} ${keyword.normalized_term}`,
+            `${interpretation.object_or_system} ${keyword.term}`,
+            `${interpretation.application_or_use} ${keyword.normalized_term}`,
+          ];
+
+          const searchTerms = Array.from(
+            new Set(
+              [
+                ...keywordLexicalTerms,
+                ...contextualizedKeywordTerms,
+              ]'''
+          if old_build_start in text:
+              text = text.replace(old_build_start, new_build_start, 1)
+          elif 'const keywordLexicalTerms = Array.from(' not in text:
+              raise SystemExit('buildClassificationLookupContext lexical anchor not found')
+
+          old_return = '  return { searchTerms, rankingTerms, contextAnchorTokens };'
+          new_return = '''  return {
+            searchTerms,
+            rankingTerms,
+            contextAnchorTokens,
+            keywordLexicalTerms,
+          };'''
+          if old_return in text:
+              text = text.replace(old_return, new_return, 1)
+          elif 'keywordLexicalTerms,' not in text:
+              raise SystemExit('ClassificationLookupContext return anchor not found')
+
+          old_destructure = '''        const {
+                  searchTerms,
+                  rankingTerms,
+                  contextAnchorTokens,
+                } = buildClassificationLookupContext('''
+          new_destructure = '''        const {
+                  searchTerms,
+                  rankingTerms,
+                  contextAnchorTokens,
+                  keywordLexicalTerms,
+                } = buildClassificationLookupContext('''
+          if old_destructure in text:
+              text = text.replace(old_destructure, new_destructure, 1)
+          elif 'keywordLexicalTerms,' not in text[text.index('buildClassificationLookupContext(')-280:text.index('buildClassificationLookupContext(')+120]:
+              raise SystemExit('lookup destructuring anchor not found')
+
+          for system in ('IPC', 'CPC', 'FI'):
+              old = f'''            "{system}",
+                      rankingTerms,
+                      contextAnchorTokens,
+                    )'''
+              new = f'''            "{system}",
+                      rankingTerms,
+                      contextAnchorTokens,
+                      keywordLexicalTerms,
+                    )'''
+              if old in text:
+                  text = text.replace(old, new, 1)
+              elif f'"{system}",' in text and 'keywordLexicalTerms,' not in text[text.index(f'"{system}",'):text.index(f'"{system}",')+220]:
+                  raise SystemExit(f'{system} call-site anchor not found')
+
+          old_reason = 'Classification candidates were retrieved from Supabase, required both lexical support and an independent document-level technical-context anchor, and were ranked against the complete technical interpretation. No model-generated classification code was accepted.'
+          new_reason = 'Classification candidates were retrieved from Supabase, required lexical keyword support plus an independent document-level technical-context anchor, and excluded singular/plural or synonym head-noun variants from satisfying that independent context gate. No model-generated classification code was accepted.'
+          text = text.replace(old_reason, new_reason)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Verify patch
+        shell: bash
+        run: |
+          grep -n "keywordIdentityTokenKeys\|classificationTokenFamilyKey\|hasKeywordLexicalSupport\|keywordLexicalTerms" supabase/functions/analyze/index.ts
+          git diff --check
+
+      - name: Commit patch and remove temporary workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add supabase/functions/analyze/index.ts
+          git rm .github/workflows/apply-keyword-identity-context-gate.yml
+          git commit -m "Exclude keyword identity from classification context"
+          git push origin HEAD:agent/keyword-identity-context-gate

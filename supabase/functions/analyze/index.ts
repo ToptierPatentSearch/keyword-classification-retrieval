@@ -2291,12 +2291,14 @@ async function lookupAndRankClassifications(
             searchTerms,
             "IPC",
             rankingTerms,
+            contextAnchorTokens,
           ),
           searchClassificationCandidates(
             adminClient,
             searchTerms,
             "CPC",
             rankingTerms,
+            contextAnchorTokens,
           ),
         ]);
 
@@ -2322,6 +2324,7 @@ async function lookupAndRankClassifications(
                 searchTerms,
                 "FI",
                 rankingTerms,
+                contextAnchorTokens,
               )
             : [];
         const fiCandidates = rawFiCandidates

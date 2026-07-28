@@ -2,7 +2,7 @@ import { loadPatentSearchInsights, type PatentSearchInsight } from "./analysisIn
 
 const ANALYSIS_STATUS_MARKER =
   "Analyzing text securely through Supabase Edge Functions";
-const ROTATION_MS = 5_000;
+const ROTATION_MS = 10_000;
 
 let insightCache: PatentSearchInsight[] | null = null;
 let insightLoadPromise: Promise<PatentSearchInsight[]> | null = null;

@@ -1,0 +1,57 @@
+name: Validate classification context gate
+
+on:
+  push:
+    branches:
+      - agent/context-gate-classifications
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/context-gate-classifications
+          fetch-depth: 0
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Type-check analyze Edge Function
+        run: deno check supabase/functions/analyze/index.ts
+
+      - name: Verify context-gate integration
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          text = Path('supabase/functions/analyze/index.ts').read_text(encoding='utf-8')
+          assert 'function candidatePassesContextGate(' in text
+          assert 'contextAnchorTokens: string[];' in text
+          assert 'candidateTitle(candidate).includes(primarySearchTerm.toLowerCase())' not in text
+          lookup = text[text.index('async function lookupAndRankClassifications('):]
+          for system in ('IPC', 'CPC', 'FI'):
+              assert re.search(
+                  rf'"{system}",\n[ \t]+rankingTerms,\n[ \t]+contextAnchorTokens,',
+                  lookup,
+              ), f'{system} search is not wired to contextAnchorTokens'
+          PY
+          git diff --check
+
+      - name: Remove validation workflow after success
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/validate-context-classification-gate.yml
+          git commit -m "Validate classification context gate"
+          git push origin HEAD:agent/context-gate-classifications

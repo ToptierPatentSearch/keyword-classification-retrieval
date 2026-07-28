@@ -1,0 +1,53 @@
+name: Validate keyword identity context gate
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [synchronize, reopened]
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    if: github.head_ref == 'agent/keyword-identity-context-gate' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/keyword-identity-context-gate
+          fetch-depth: 0
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Type-check analyze Edge Function
+        run: deno check supabase/functions/analyze/index.ts
+
+      - name: Verify gate wiring
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('supabase/functions/analyze/index.ts').read_text(encoding='utf-8')
+          assert 'function classificationTokenFamilyKey(' in text
+          assert 'function keywordIdentityTokenKeys(' in text
+          assert 'function hasKeywordLexicalSupport(' in text
+          assert 'hasKeywordLexicalSupport(candidate, keywordLexicalTerms)' in text
+          lookup = text[text.index('async function lookupAndRankClassifications('):]
+          assert lookup.count('keywordLexicalTerms,') >= 4
+          PY
+          git diff --check
+
+      - name: Remove temporary validation workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/validate-keyword-identity-context-gate.yml
+          git commit -m "Validate keyword identity context gate"
+          git push origin HEAD:agent/keyword-identity-context-gate

@@ -96,7 +96,9 @@ interface ClassificationLookupContext {
   searchTerms: string[];
   rankingTerms: string[];
   contextAnchorTokens: string[];
+  domainAnchorTokens: string[];
   keywordLexicalTerms: string[];
+  genericKeyword: boolean;
 }
 
 interface ClassificationRouteCode extends ClassificationCodeEvidence {
@@ -1677,32 +1679,76 @@ function classificationContextAnchorTokens(
   });
 }
 
+function candidateTokenFamilyKeys(
+  candidate: ClassificationCandidate,
+): Set<string> {
+  return new Set(
+    technicalTokens(candidateTitle(candidate))
+      .map(classificationTokenFamilyKey)
+      .filter(Boolean),
+  );
+}
+
+function technicalTokenFamilyKeys(value: string): string[] {
+  return Array.from(
+    new Set(
+      technicalTokens(value)
+        .filter(
+          (token) => !GENERIC_CLASSIFICATION_CONTEXT_TOKENS.has(token),
+        )
+        .map(classificationTokenFamilyKey)
+        .filter(Boolean),
+    ),
+  );
+}
+
+function candidateSupportsTerm(
+  candidate: ClassificationCandidate,
+  term: string,
+): boolean {
+  const termKeys = technicalTokenFamilyKeys(term);
+  if (termKeys.length === 0) return false;
+
+  const candidateKeys = candidateTokenFamilyKeys(candidate);
+  const hits = termKeys.filter((key) => candidateKeys.has(key)).length;
+  const coverage = hits / termKeys.length;
+
+  return termKeys.length === 1 ? hits === 1 : coverage >= 0.67;
+}
+
+function candidateAnchorHits(
+  candidate: ClassificationCandidate,
+  anchorTokens: string[],
+): string[] {
+  const candidateKeys = candidateTokenFamilyKeys(candidate);
+
+  return anchorTokens.filter((token) => {
+    const key = classificationTokenFamilyKey(token);
+    return Boolean(key) && candidateKeys.has(key);
+  });
+}
+
 function candidateContextAnchorHits(
   candidate: ClassificationCandidate,
   contextAnchorTokens: string[],
 ): string[] {
-  const title = candidateTitle(candidate);
-  return contextAnchorTokens.filter((token) => title.includes(token));
+  return candidateAnchorHits(candidate, contextAnchorTokens);
+}
+
+function candidateDomainAnchorHits(
+  candidate: ClassificationCandidate,
+  domainAnchorTokens: string[],
+): string[] {
+  return candidateAnchorHits(candidate, domainAnchorTokens);
 }
 
 function hasStrongMultiwordSearchSupport(
   candidate: ClassificationCandidate,
   searchTerms: string[],
 ): boolean {
-  const title = candidateTitle(candidate);
-
   return searchTerms.some((term) => {
-    const tokens = Array.from(
-      new Set(
-        technicalTokens(term).filter(
-          (token) => !GENERIC_CLASSIFICATION_CONTEXT_TOKENS.has(token),
-        ),
-      ),
-    );
-
-    return (
-      tokens.length >= 2 && tokens.every((token) => title.includes(token))
-    );
+    const keys = technicalTokenFamilyKeys(term);
+    return keys.length >= 2 && candidateSupportsTerm(candidate, term);
   });
 }
 
@@ -1718,25 +1764,111 @@ function candidatePassesContextGate(
   return candidateContextAnchorHits(candidate, contextAnchorTokens).length > 0;
 }
 
+const GENERIC_CLASSIFICATION_KEYWORD_HEADS = new Set([
+  'sensor', 'detector', 'controller', 'processor', 'module', 'unit',
+  'device', 'system', 'signal', 'data', 'camera', 'motor', 'actuator',
+  'interface', 'circuit', 'network', 'component', 'element', 'mechanism',
+  'apparatus', 'memory', 'terminal', 'server', 'client', 'control', 'position',
+]);
+
+function keywordHeadFamilyKey(keyword: KeywordClassification): string {
+  const preferredTokens = technicalTokens(
+    keyword.normalized_term || keyword.term,
+  ).filter((token) => /^[a-z][a-z0-9-]*$/u.test(token));
+  const fallbackTokens = technicalTokens(keyword.term).filter((token) =>
+    /^[a-z][a-z0-9-]*$/u.test(token),
+  );
+  const tokens = preferredTokens.length > 0 ? preferredTokens : fallbackTokens;
+  const head = tokens[tokens.length - 1] ?? '';
+  return classificationTokenFamilyKey(head);
+}
+
+function isGenericClassificationKeyword(
+  keyword: KeywordClassification,
+): boolean {
+  const head = keywordHeadFamilyKey(keyword);
+  return Boolean(head) && GENERIC_CLASSIFICATION_KEYWORD_HEADS.has(head);
+}
+
+function classificationDomainAnchorTokens(
+  keyword: KeywordClassification,
+  technicalConcept: TechnicalInterpretation,
+): string[] {
+  const keywordIdentityKeys = keywordIdentityTokenKeys(keyword);
+  const primaryValues = [
+    technicalConcept.object_or_system,
+    technicalConcept.application_or_use,
+  ];
+  const fallbackValues = technicalConcept.context_terms;
+
+  const collect = (values: string[]) =>
+    Array.from(new Set(values.flatMap((value) => technicalTokens(value))))
+      .filter((token) => {
+        const key = classificationTokenFamilyKey(token);
+        return (
+          Boolean(key) &&
+          !keywordIdentityKeys.has(key) &&
+          !GENERIC_CLASSIFICATION_CONTEXT_TOKENS.has(token) &&
+          !/^\d+$/u.test(token)
+        );
+      })
+      .slice(0, 12);
+
+  const primary = collect(primaryValues);
+  return primary.length > 0 ? primary : collect(fallbackValues);
+}
+
+function candidatePassesDomainGate(
+  candidate: ClassificationCandidate,
+  domainAnchorTokens: string[],
+  genericKeyword: boolean,
+): boolean {
+  if (!genericKeyword) return true;
+  if (domainAnchorTokens.length === 0) return false;
+  return candidateDomainAnchorHits(candidate, domainAnchorTokens).length > 0;
+}
+
+function classificationSubclassPrefix(code: string): string {
+  const match = code.normalize('NFKC').toUpperCase().match(/^\s*([A-H]\d{2}[A-Z])/u);
+  return match?.[1] ?? '';
+}
+
+function deriveDomainNeighborhoodPrefixes(
+  candidates: ClassificationCandidate[],
+  domainAnchorTokens: string[],
+  keywordLexicalTerms: string[],
+): Set<string> {
+  if (domainAnchorTokens.length === 0) return new Set<string>();
+  const votes = new Map<string, number>();
+
+  for (const candidate of candidates) {
+    if (!hasKeywordLexicalSupport(candidate, keywordLexicalTerms)) continue;
+    const domainHits = candidateDomainAnchorHits(candidate, domainAnchorTokens).length;
+    if (domainHits === 0) continue;
+    const prefix = classificationSubclassPrefix(candidate.code);
+    if (!prefix) continue;
+    const weight = Math.min(3, domainHits) + Math.min(
+      1,
+      Math.max(0, Number(candidate.similarity_score) || 0),
+    );
+    votes.set(prefix, (votes.get(prefix) ?? 0) + weight);
+  }
+
+  const ranked = Array.from(votes.entries()).sort((a, b) => b[1] - a[1]);
+  if (ranked.length === 0) return new Set<string>();
+  const topWeight = ranked[0][1];
+  return new Set(
+    ranked
+      .filter(([, weight], index) => index < 2 && weight >= topWeight * 0.55)
+      .map(([prefix]) => prefix),
+  );
+}
+
 function hasKeywordLexicalSupport(
   candidate: ClassificationCandidate,
   keywordLexicalTerms: string[],
 ): boolean {
-  const title = candidateTitle(candidate);
-
-  return keywordLexicalTerms.some((term) => {
-    const normalizedTerm = term.normalize("NFKC").trim().toLowerCase();
-    if (normalizedTerm && title.includes(normalizedTerm)) return true;
-
-    const tokens = technicalTokens(term).filter(
-      (token) => !GENERIC_CLASSIFICATION_CONTEXT_TOKENS.has(token),
-    );
-    if (tokens.length === 0) return false;
-
-    const tokenHits = tokens.filter((token) => title.includes(token)).length;
-    const coverage = tokenHits / tokens.length;
-    return tokens.length === 1 ? coverage === 1 : coverage >= 0.67;
-  });
+  return keywordLexicalTerms.some((term) => candidateSupportsTerm(candidate, term));
 }
 
 function calculateCandidateMatchScore(
@@ -1744,54 +1876,41 @@ function calculateCandidateMatchScore(
   searchTerms: string[],
   rankingTerms: string[],
   contextAnchorTokens: string[] = [],
+  domainAnchorTokens: string[] = [],
 ): number {
-  const title = candidateTitle(candidate);
-  const primarySearchTerm = searchTerms[0] ?? "";
-  const query = primarySearchTerm.normalize("NFKC").trim().toLowerCase();
+  const primarySearchTerm = searchTerms[0] ?? '';
   const normalizedSearchTerms = searchTerms
-    .map((term) => term.normalize("NFKC").trim().toLowerCase())
+    .map((term) => term.normalize('NFKC').trim().toLowerCase())
     .filter(Boolean);
   const queryWords = Array.from(
-    new Set(normalizedSearchTerms.flatMap(technicalTokens)),
+    new Set(normalizedSearchTerms.flatMap(technicalTokenFamilyKeys)),
   );
   const queryWordSet = new Set(queryWords);
   const contextWords = Array.from(
-    new Set(rankingTerms.flatMap(technicalTokens)),
+    new Set(rankingTerms.flatMap(technicalTokenFamilyKeys)),
   ).filter((word) => !queryWordSet.has(word));
-  const anchorHits = candidateContextAnchorHits(
-    candidate,
-    contextAnchorTokens,
-  );
-  let score = Math.min(0.34, Number(candidate.similarity_score) || 0);
+  const candidateKeys = candidateTokenFamilyKeys(candidate);
+  const anchorHits = candidateContextAnchorHits(candidate, contextAnchorTokens);
+  const domainHits = candidateDomainAnchorHits(candidate, domainAnchorTokens);
+  let score = Math.min(0.32, Number(candidate.similarity_score) || 0);
 
-  if (query && title.includes(query)) {
-    score += 0.12;
+  if (primarySearchTerm && candidateSupportsTerm(candidate, primarySearchTerm)) {
+    score += 0.11;
   }
-
   const exactPhraseHits = normalizedSearchTerms.filter(
-    (term) => term !== query && title.includes(term),
+    (term) => term !== primarySearchTerm && candidateSupportsTerm(candidate, term),
   ).length;
   score += Math.min(0.08, exactPhraseHits * 0.04);
 
-  const queryWordHits = queryWords.filter((word) =>
-    title.includes(word),
-  ).length;
-  const queryCoverage =
-    queryWords.length > 0 ? queryWordHits / queryWords.length : 0;
-  score += Math.min(0.14, queryCoverage * 0.14);
+  const queryWordHits = queryWords.filter((word) => candidateKeys.has(word)).length;
+  const queryCoverage = queryWords.length > 0 ? queryWordHits / queryWords.length : 0;
+  score += Math.min(0.13, queryCoverage * 0.13);
 
-  const contextHits = contextWords.filter((word) =>
-    title.includes(word),
-  ).length;
-  const contextCoverage =
-    contextWords.length > 0 ? contextHits / contextWords.length : 0;
-  score += Math.min(
-    0.1,
-    contextHits * 0.012 + contextCoverage * 0.05,
-  );
-
-  score += Math.min(0.24, anchorHits.length * 0.12);
-
+  const contextHits = contextWords.filter((word) => candidateKeys.has(word)).length;
+  const contextCoverage = contextWords.length > 0 ? contextHits / contextWords.length : 0;
+  score += Math.min(0.09, contextHits * 0.01 + contextCoverage * 0.045);
+  score += Math.min(0.2, anchorHits.length * 0.1);
+  score += Math.min(0.2, domainHits.length * 0.1);
   return Math.max(0, Math.min(1, score));
 }
 
@@ -1801,7 +1920,9 @@ async function searchClassificationCandidates(
   system: CatalogClassificationSystem,
   contextTerms: string[],
   contextAnchorTokens: string[],
+  domainAnchorTokens: string[],
   keywordLexicalTerms: string[],
+  genericKeyword: boolean,
 ): Promise<ClassificationCandidate[]> {
   const uniqueSearchTerms = Array.from(
     new Set(searchTerms.map((term) => term.trim()).filter(Boolean)),
@@ -1809,87 +1930,75 @@ async function searchClassificationCandidates(
   const candidatesByCode = new Map<string, ClassificationCandidate>();
 
   for (const searchText of uniqueSearchTerms) {
-    const { data, error } = await adminClient.rpc(
-      "search_classification_titles",
-      {
-        search_text: searchText,
-        requested_systems: [system],
-        result_limit: CLASSIFICATION_SEARCH_LIMIT,
-      },
-    );
-
-    if (error) {
-      throw new Error(`${system} candidate search failed: ${error.message}`);
-    }
+    const { data, error } = await adminClient.rpc('search_classification_titles', {
+      search_text: searchText,
+      requested_systems: [system],
+      result_limit: CLASSIFICATION_SEARCH_LIMIT,
+    });
+    if (error) throw new Error(`${system} candidate search failed: ${error.message}`);
 
     for (const rawCandidate of data ?? []) {
       const candidate = rawCandidate as ClassificationCandidate;
-      if (candidate.system !== system || !candidate.code) {
-        continue;
-      }
-
+      if (candidate.system !== system || !candidate.code) continue;
       const normalizedCode = normalizeClassificationCode(candidate.code);
       const previous = candidatesByCode.get(normalizedCode);
-
-      if (
-        !previous ||
-        Number(candidate.similarity_score) > Number(previous.similarity_score)
-      ) {
+      if (!previous || Number(candidate.similarity_score) > Number(previous.similarity_score)) {
         candidatesByCode.set(normalizedCode, candidate);
       }
     }
   }
 
-  return Array.from(candidatesByCode.values())
+  const scoredCandidates = Array.from(candidatesByCode.values()).map((candidate) => {
+    const matchedTerms = uniqueSearchTerms.filter((term) =>
+      candidateSupportsTerm(candidate, term),
+    );
+    const baseScore = calculateCandidateMatchScore(
+      candidate,
+      uniqueSearchTerms,
+      contextTerms,
+      contextAnchorTokens,
+      domainAnchorTokens,
+    );
+    return {
+      ...candidate,
+      matched_terms: matchedTerms,
+      match_score: Math.min(1, baseScore + Math.min(0.08, matchedTerms.length * 0.03)),
+    };
+  });
+
+  const neighborhoodPrefixes = deriveDomainNeighborhoodPrefixes(
+    scoredCandidates,
+    domainAnchorTokens,
+    keywordLexicalTerms,
+  );
+
+  return scoredCandidates
     .map((candidate) => {
-      const matchedTerms = uniqueSearchTerms.filter((term) => {
-        const title = candidateTitle(candidate);
-        const normalizedTerm = term.normalize("NFKC").trim().toLowerCase();
-        const tokens = technicalTokens(term).filter(
-          (token) => !GENERIC_CLASSIFICATION_CONTEXT_TOKENS.has(token),
-        );
-
-        if (normalizedTerm && title.includes(normalizedTerm)) {
-          return true;
-        }
-
-        if (tokens.length === 0) {
-          return false;
-        }
-
-        const tokenHits = tokens.filter((token) =>
-          title.includes(token),
-        ).length;
-        const coverage = tokenHits / tokens.length;
-
-        return tokens.length === 1 ? coverage === 1 : coverage >= 0.67;
-      });
-      const baseScore = calculateCandidateMatchScore(
-        candidate,
-        uniqueSearchTerms,
-        contextTerms,
-        contextAnchorTokens,
-      );
-
+      const prefix = classificationSubclassPrefix(candidate.code);
+      const neighborhoodMatch = Boolean(prefix) && neighborhoodPrefixes.has(prefix);
+      const adjustment = neighborhoodPrefixes.size === 0
+        ? 0
+        : neighborhoodMatch
+          ? 0.08
+          : genericKeyword
+            ? -0.1
+            : -0.04;
       return {
         ...candidate,
-        matched_terms: matchedTerms,
-        match_score: Math.min(
-          1,
-          baseScore + Math.min(0.08, matchedTerms.length * 0.03),
-        ),
+        match_score: Math.max(0, Math.min(1, (candidate.match_score ?? 0) + adjustment)),
       };
     })
-    .filter(
-      (candidate) =>
+    .filter((candidate) => {
+      const prefix = classificationSubclassPrefix(candidate.code);
+      const neighborhoodMatch = Boolean(prefix) && neighborhoodPrefixes.has(prefix);
+      return (
         (candidate.match_score ?? 0) >= 0.38 &&
         hasKeywordLexicalSupport(candidate, keywordLexicalTerms) &&
-        candidatePassesContextGate(
-          candidate,
-          contextAnchorTokens,
-          uniqueSearchTerms,
-        ),
-    )
+        candidatePassesContextGate(candidate, contextAnchorTokens, uniqueSearchTerms) &&
+        candidatePassesDomainGate(candidate, domainAnchorTokens, genericKeyword) &&
+        (!genericKeyword || neighborhoodPrefixes.size === 0 || neighborhoodMatch)
+      );
+    })
     .sort(
       (a, b) =>
         (b.match_score ?? 0) - (a.match_score ?? 0) ||
@@ -1918,53 +2027,46 @@ function buildClassificationLookupContext(
     `${interpretation.object_or_system} ${keyword.term}`,
     `${interpretation.application_or_use} ${keyword.normalized_term}`,
   ];
-
   const searchTerms = Array.from(
-    new Set(
-      [
-        ...keywordLexicalTerms,
-        ...contextualizedKeywordTerms,
-      ]
-        .map((value) => value.trim())
-        .filter(Boolean),
-    ),
+    new Set([...keywordLexicalTerms, ...contextualizedKeywordTerms]
+      .map((value) => value.trim())
+      .filter(Boolean)),
   ).slice(0, 8);
-
   const rankingTerms = Array.from(
-    new Set(
-      [
-        interpretation.object_or_system,
-        interpretation.purpose_or_problem,
-        interpretation.application_or_use,
-        ...interpretation.components,
-        ...keyword.concept_basis,
-        ...interpretation.component_relationships,
-        ...interpretation.material_or_composition,
-        ...interpretation.manufacturing_or_processing_steps,
-        interpretation.operation,
-        ...interpretation.control_means,
-        ...interpretation.controlled_variables,
-        ...interpretation.operating_conditions,
-        interpretation.technical_effect,
-        ...interpretation.context_terms,
-        ...interpretation.search_phrases,
-        ...neighboringTerms,
-      ]
-        .map((value) => value.trim())
-        .filter(Boolean),
-    ),
+    new Set([
+      interpretation.object_or_system,
+      interpretation.purpose_or_problem,
+      interpretation.application_or_use,
+      ...interpretation.components,
+      ...keyword.concept_basis,
+      ...interpretation.component_relationships,
+      ...interpretation.material_or_composition,
+      ...interpretation.manufacturing_or_processing_steps,
+      interpretation.operation,
+      ...interpretation.control_means,
+      ...interpretation.controlled_variables,
+      ...interpretation.operating_conditions,
+      interpretation.technical_effect,
+      ...interpretation.context_terms,
+      ...interpretation.search_phrases,
+      ...neighboringTerms,
+    ].map((value) => value.trim()).filter(Boolean)),
   );
   const contextAnchorTokens = classificationContextAnchorTokens(
     keyword,
     interpretation,
     neighboringTerms,
   );
+  const domainAnchorTokens = classificationDomainAnchorTokens(keyword, interpretation);
+  const genericKeyword = isGenericClassificationKeyword(keyword);
 
   return {
     searchTerms,
     rankingTerms,
     contextAnchorTokens,
+    domainAnchorTokens,
     keywordLexicalTerms,
+    genericKeyword,
   };
 }
 
@@ -2375,11 +2477,13 @@ async function lookupAndRankClassifications(
         const keyword = enrichedKeywords[keywordIndex];
 
         const {
-          searchTerms,
-          rankingTerms,
-          contextAnchorTokens,
-          keywordLexicalTerms,
-        } = buildClassificationLookupContext(
+  searchTerms,
+  rankingTerms,
+  contextAnchorTokens,
+  domainAnchorTokens,
+  keywordLexicalTerms,
+  genericKeyword,
+} = buildClassificationLookupContext(
           keyword,
           result.technical_concept,
           contextTerms,
@@ -2392,7 +2496,9 @@ async function lookupAndRankClassifications(
             "IPC",
             rankingTerms,
             contextAnchorTokens,
-            keywordLexicalTerms,
+            domainAnchorTokens,
+                keywordLexicalTerms,
+                genericKeyword,
           ),
           searchClassificationCandidates(
             adminClient,
@@ -2400,7 +2506,9 @@ async function lookupAndRankClassifications(
             "CPC",
             rankingTerms,
             contextAnchorTokens,
-            keywordLexicalTerms,
+            domainAnchorTokens,
+                keywordLexicalTerms,
+                genericKeyword,
           ),
         ]);
 
@@ -2427,7 +2535,9 @@ async function lookupAndRankClassifications(
                 "FI",
                 rankingTerms,
                 contextAnchorTokens,
+                domainAnchorTokens,
                 keywordLexicalTerms,
+                genericKeyword,
               )
             : [];
         const fiCandidates = rawFiCandidates
@@ -2560,7 +2670,7 @@ async function lookupAndRankClassifications(
 
     keyword.classification_reason =
       catalogBackedCount > 0
-        ? "Classification candidates were retrieved from Supabase, required lexical keyword support plus an independent document-level technical-context anchor, and excluded singular/plural or synonym head-noun variants from satisfying that independent context gate. No model-generated classification code was accepted."
+        ? "Classification candidates were retrieved from Supabase, required exact token-family keyword support plus independent technical context, and generic keywords additionally required document-domain agreement. Domain-supported IPC/CPC/FI subclass neighborhoods were favored over remote classes. No model-generated classification code was accepted."
         : "No Supabase classification record passed the technical-context threshold. Classification codes were left empty rather than generated by AI.";
   }
 

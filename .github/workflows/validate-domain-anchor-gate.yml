@@ -1,0 +1,58 @@
+name: Validate domain anchor classification gate
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [synchronize]
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    if: github.head_ref == 'agent/domain-anchor-classification-gate' && github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/domain-anchor-classification-gate
+          fetch-depth: 0
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Type-check and verify domain gate
+        shell: bash
+        run: |
+          deno check supabase/functions/analyze/index.ts
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('supabase/functions/analyze/index.ts').read_text(encoding='utf-8')
+          required = [
+              'function classificationDomainAnchorTokens(',
+              'function candidatePassesDomainGate(',
+              'function deriveDomainNeighborhoodPrefixes(',
+              'function candidateTokenFamilyKeys(',
+              'GENERIC_CLASSIFICATION_KEYWORD_HEADS',
+              'domainAnchorTokens,',
+              'genericKeyword,',
+          ]
+          for item in required:
+              assert item in text, item
+          assert 'candidateTitle(candidate).includes(token)' not in text
+          assert 'candidatePassesDomainGate(' in text
+          PY
+          git diff --check
+
+      - name: Remove temporary validation workflow
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/validate-domain-anchor-gate.yml
+          git commit -m "Validate domain anchor classification gate"
+          git push origin HEAD:agent/domain-anchor-classification-gate

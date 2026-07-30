@@ -15,6 +15,8 @@ import type {
 } from "./types";
 import { PricingPlans } from "./components/PricingPlans";
 import TryDemoPage from "./components/TryDemoPage";
+import SearchQueryStarter from "./components/SearchQueryStarter";
+import { buildSearchQueryStarter } from "./searchQuery";
 import {
   ArrowRight,
   ChevronDown,
@@ -1303,6 +1305,10 @@ export default function App() {
         : [],
     [result],
   );
+  const searchQueryStarter = useMemo(
+    () => (result ? buildSearchQueryStarter(result) : null),
+    [result],
+  );
 
   const fallbackEstimatedResultTime = useMemo(
     () => estimateResultTime(text.trim().length),
@@ -2048,6 +2054,12 @@ export default function App() {
               />
             ))}
           </div>
+          {searchQueryStarter && (
+            <SearchQueryStarter
+              starter={searchQueryStarter}
+              className="analysis-query-starter"
+            />
+          )}
         </section>
       )}
       <Footer />

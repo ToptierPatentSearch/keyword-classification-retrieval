@@ -7,6 +7,8 @@ import {
   Search,
   Sparkles,
 } from "lucide-react";
+import SearchQueryStarter from "./SearchQueryStarter";
+import type { GeneratedSearchQueryStarter } from "../searchQuery";
 import "./TryDemoPage.css";
 
 const DEMO_TECHNICAL_EXAMPLE = `An electric-vehicle wireless charging system includes a ground-side power-transmitting coil, a vehicle-side power-receiving coil, and a camera that detects alignment markers around the charging pad. A controller estimates lateral and angular misalignment from the camera images and adjusts the vehicle parking position before energizing the transmitting coil. During power transfer, the controller monitors coupling efficiency and coil temperature, then changes the inverter frequency and transmitted power to maintain charging efficiency while preventing overheating.`;
@@ -47,6 +49,13 @@ const DEMO_CLASSIFICATIONS = [
     title: "Circuit arrangements for inductive wireless power transfer",
   },
 ];
+
+const DEMO_QUERY_STARTER: GeneratedSearchQueryStarter = {
+  keywordQuery:
+    '("wireless EV charging" OR "inductive vehicle charging") AND ("coil alignment" OR misalignment) AND (efficiency OR temperature)',
+  classificationQuery:
+    "IPC=(B60L 53/12 OR H02J 50/10) OR CPC=(B60L 53/38)",
+};
 
 type TryDemoPageProps = {
   onBack: () => void;
@@ -194,19 +203,10 @@ export default function TryDemoPage({
             </div>
           </article>
 
-          <article className="demo-panel demo-query-panel">
-            <p className="demo-result-label">Search-ready query concept</p>
-            <code>
-              (&quot;wireless EV charging&quot; OR &quot;inductive vehicle
-              charging&quot;) AND (&quot;coil alignment&quot; OR
-              misalignment) AND (efficiency OR temperature)
-            </code>
-            <p>
-              Use the mapped concepts and classifications as a starting point,
-              then confirm the current scope and terminology in the relevant
-              official classification database.
-            </p>
-          </article>
+          <SearchQueryStarter
+            starter={DEMO_QUERY_STARTER}
+            className="demo-panel"
+          />
         </div>
       </section>
 

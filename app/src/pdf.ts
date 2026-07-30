@@ -1,6 +1,10 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import type { AnalysisResult } from "./types";
+import {
+  buildSearchQueryStarter,
+  SEARCH_QUERY_REVIEW_NOTICE,
+} from "./searchQuery";
 
 const PDF_FONT_FILE = "ipaexg.ttf";
 const PDF_FONT_FAMILY = "IPAexGothic";
@@ -188,6 +192,73 @@ export async function downloadAnalysisPdf(
     currentY =
       ((doc as AutoTableDocument).lastAutoTable?.finalY ?? currentY) + 18;
   }
+
+  const searchQueryStarter = buildSearchQueryStarter(result);
+
+  if (currentY > pageHeight - 220) {
+    doc.addPage("a4", "portrait");
+    currentY = 40;
+  }
+
+  autoTable(doc, {
+    startY: currentY,
+    margin: { left: 40, right: 40 },
+    head: [
+      [
+        "Generated Search Query Starter",
+        "Starting point for professional review",
+      ],
+    ],
+    body: [
+      [
+        "Boolean keyword query",
+        searchQueryStarter.keywordQuery ||
+          "No supported keyword query could be generated.",
+      ],
+      [
+        "IPC/CPC classification query",
+        searchQueryStarter.classificationQuery ||
+          "No database-verified IPC/CPC codes were available.",
+      ],
+    ],
+    styles: {
+      font: PDF_FONT_FAMILY,
+      fontStyle: "normal",
+      fontSize: 9,
+      cellPadding: 5,
+      overflow: "linebreak",
+      valign: "top",
+    },
+    headStyles: {
+      fillColor: [67, 56, 202],
+      font: PDF_FONT_FAMILY,
+      fontStyle: "normal",
+      fontSize: 10,
+    },
+    columnStyles: {
+      0: { cellWidth: 150, fontStyle: "normal", textColor: [51, 65, 85] },
+      1: { cellWidth: contentWidth - 150 },
+    },
+    rowPageBreak: "avoid",
+  });
+
+  currentY =
+    ((doc as AutoTableDocument).lastAutoTable?.finalY ?? currentY) + 12;
+
+  if (currentY > pageHeight - 70) {
+    doc.addPage("a4", "portrait");
+    currentY = 40;
+  }
+
+  doc.setFont(PDF_FONT_FAMILY, "normal");
+  doc.setFontSize(8);
+  doc.setTextColor(71, 85, 105);
+  doc.text(
+    doc.splitTextToSize(SEARCH_QUERY_REVIEW_NOTICE, contentWidth),
+    40,
+    currentY,
+  );
+  doc.setTextColor(0, 0, 0);
 
   doc.save(
     `patent-keyword-analysis-${new Date().toISOString().slice(0, 10)}.pdf`,

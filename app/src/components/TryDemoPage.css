@@ -311,8 +311,7 @@
   font-size: clamp(1.35rem, 2.4vw, 1.85rem);
 }
 
-.demo-concept-panel > p:not(.demo-result-label),
-.demo-query-panel > p:not(.demo-result-label) {
+.demo-concept-panel > p:not(.demo-result-label) {
   margin: 12px 0 0;
   color: #526176;
   line-height: 1.65;
@@ -408,19 +407,6 @@
   color: #526176;
   font-size: 0.76rem;
   line-height: 1.5;
-}
-
-.demo-query-panel code {
-  display: block;
-  padding: 15px;
-  border: 1px solid #c7d2fe;
-  border-radius: 13px;
-  background: #eef2ff;
-  color: #312e81;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 0.82rem;
-  line-height: 1.65;
-  white-space: normal;
 }
 
 .demo-footer-cta {

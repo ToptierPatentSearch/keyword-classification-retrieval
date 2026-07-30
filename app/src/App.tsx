@@ -14,6 +14,7 @@ import type {
   TechnicalInterpretation,
 } from "./types";
 import { PricingPlans } from "./components/PricingPlans";
+import TryDemoPage from "./components/TryDemoPage";
 import {
   ArrowRight,
   ChevronDown,
@@ -649,9 +650,10 @@ function estimateResultTime(characterCount: number): string {
 }
 type LandingPageProps = {
   onAcceptTerms: () => void;
+  onOpenDemo: () => void;
 };
 
-function LandingPage({ onAcceptTerms }: LandingPageProps) {
+function LandingPage({ onAcceptTerms, onOpenDemo }: LandingPageProps) {
   const [checked, setChecked] = useState(false);
 
   return (
@@ -666,6 +668,19 @@ function LandingPage({ onAcceptTerms }: LandingPageProps) {
           organizing likely technical terms and classification-related
           information.
         </p>
+
+        <div className="landing-demo-cta">
+          <button
+            className="landing-demo-button"
+            type="button"
+            onClick={onOpenDemo}
+          >
+            <Sparkles aria-hidden="true" />
+            Try Demo
+            <ArrowRight aria-hidden="true" />
+          </button>
+          <span>No sign-in required · No analysis credit used</span>
+        </div>
 
         <div className="landing-section">
           <h2>Brief Features</h2>
@@ -997,12 +1012,15 @@ export default function App() {
   const [consentRetryKey, setConsentRetryKey] = useState(0);
   const [currentRoute, setCurrentRoute] = useState<
     | "analysis"
+    | "demo"
     | "admin-user-activity"
     | "admin-user-consents"
     | "admin-error-logs"
     | "admin-package-purchases"
   >(() =>
-    window.location.hash === "#/admin/error-logs"
+    window.location.hash === "#/demo"
+      ? "demo"
+      : window.location.hash === "#/admin/error-logs"
       ? "admin-error-logs"
       : window.location.hash === "#/admin/package-purchases"
       ? "admin-package-purchases"
@@ -1053,7 +1071,9 @@ export default function App() {
   useEffect(() => {
     function updateRoute() {
       setCurrentRoute(
-        window.location.hash === "#/admin/error-logs"
+        window.location.hash === "#/demo"
+          ? "demo"
+          : window.location.hash === "#/admin/error-logs"
           ? "admin-error-logs"
           : window.location.hash === "#/admin/package-purchases"
           ? "admin-package-purchases"
@@ -1551,8 +1571,33 @@ export default function App() {
     );
   }
 
+  if (currentRoute === "demo") {
+    return (
+      <TryDemoPage
+        continueLabel={
+          session && termsAccepted
+            ? "Open analysis workspace"
+            : "Create your own analysis"
+        }
+        onBack={() => {
+          window.location.hash = "";
+        }}
+        onContinue={() => {
+          window.location.hash = "";
+        }}
+      />
+    );
+  }
+
   if (!termsAccepted) {
-    return <LandingPage onAcceptTerms={handleAcceptTerms} />;
+    return (
+      <LandingPage
+        onAcceptTerms={handleAcceptTerms}
+        onOpenDemo={() => {
+          window.location.hash = "#/demo";
+        }}
+      />
+    );
   }
 
   if (!session) {

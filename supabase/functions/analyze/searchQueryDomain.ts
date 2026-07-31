@@ -14,6 +14,22 @@ export interface SearchQueryDomainConcept {
   search_phrases: string[];
 }
 
+export function buildDomainFilteredClassificationQuery(
+  codes: Record<SearchQueryDomainSystem, string[]>,
+): string {
+  const parts: string[] = [];
+
+  if (codes.IPC.length > 0) {
+    parts.push(`IPC=(${codes.IPC.join(" OR ")})`);
+  }
+
+  if (codes.CPC.length > 0) {
+    parts.push(`CPC=(${codes.CPC.join(" OR ")})`);
+  }
+
+  return parts.join(" OR ");
+}
+
 interface DomainPrefixScore {
   prefix: string;
   codeKeys: Set<string>;

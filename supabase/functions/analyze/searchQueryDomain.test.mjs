@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { filterClassificationCodesByDomain } from "./searchQueryDomain.ts";
+import {
+  buildDomainFilteredClassificationQuery,
+  filterClassificationCodesByDomain,
+} from "./searchQueryDomain.ts";
 
 test("keeps the elevator domain and removes remote generic matches", () => {
   const result = filterClassificationCodesByDomain(
@@ -53,6 +56,10 @@ test("keeps the elevator domain and removes remote generic matches", () => {
   assert.deepEqual(result.dominantPrefixes, ["B66B"]);
   assert.deepEqual(result.codes.IPC, ["B66B 1/00", "B66B 5/00"]);
   assert.deepEqual(result.codes.CPC, ["B66B1/00", "B66B5/00"]);
+  assert.equal(
+    buildDomainFilteredClassificationQuery(result.codes),
+    "IPC=(B66B 1/00 OR B66B 5/00) OR CPC=(B66B1/00 OR B66B5/00)",
+  );
 });
 
 test("retains a second strongly anchored domain for a cross-domain invention", () => {
@@ -96,4 +103,8 @@ test("retains a second strongly anchored domain for a cross-domain invention", (
   assert.deepEqual(result.dominantPrefixes, ["H02J", "B60L"]);
   assert.deepEqual(result.codes.IPC, ["B60L 53/12", "H02J 50/10"]);
   assert.deepEqual(result.codes.CPC, ["B60L53/126", "H02J50/10"]);
+  assert.equal(
+    buildDomainFilteredClassificationQuery(result.codes),
+    "IPC=(B60L 53/12 OR H02J 50/10) OR CPC=(B60L53/126 OR H02J50/10)",
+  );
 });

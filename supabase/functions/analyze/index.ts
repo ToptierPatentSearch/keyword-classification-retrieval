@@ -4,6 +4,7 @@ import {
   type SupabaseClient,
 } from "npm:@supabase/supabase-js@^2.44.4";
 import {
+  buildDomainFilteredClassificationQuery,
   filterClassificationCodesByDomain,
   type SearchQueryDomainCandidate,
 } from "./searchQueryDomain.ts";
@@ -1124,6 +1125,85 @@ function selectedCodeValues(
   return Array.from(selectedCodes).sort((a, b) => a.localeCompare(b));
 }
 
+function assertValidSearchQueryReviewSelection(
+  selection: SearchQueryReviewSelection,
+  termOptions: SearchQueryTermOption[],
+  ipcOptions: SearchQueryCodeOption[],
+  cpcOptions: SearchQueryCodeOption[],
+): void {
+  const allowedTermIds = new Set(termOptions.map((option) => option.id));
+  const allowedIpcIds = new Set(ipcOptions.map((option) => option.id));
+  const allowedCpcIds = new Set(cpcOptions.map((option) => option.id));
+  const seenTermIds = new Set<string>();
+
+  if (
+    !Array.isArray(selection.keyword_groups) ||
+    selection.keyword_groups.length === 0 ||
+    selection.keyword_groups.length > MAX_QUERY_KEYWORD_GROUPS
+  ) {
+    throw new Error(
+      "AI search-query review returned an invalid keyword-group count.",
+    );
+  }
+
+  for (const group of selection.keyword_groups) {
+    if (
+      !Array.isArray(group?.term_ids) ||
+      group.term_ids.length === 0 ||
+      group.term_ids.length > MAX_QUERY_TERMS_PER_GROUP
+    ) {
+      throw new Error(
+        "AI search-query review returned an invalid term-ID group.",
+      );
+    }
+
+    for (const id of group.term_ids) {
+      if (
+        typeof id !== "string" ||
+        !allowedTermIds.has(id) ||
+        seenTermIds.has(id)
+      ) {
+        throw new Error(
+          "AI search-query review returned an unsupported or duplicate term ID.",
+        );
+      }
+
+      seenTermIds.add(id);
+    }
+  }
+
+  const validateCodeIds = (
+    value: unknown,
+    allowedIds: Set<string>,
+    system: "IPC" | "CPC",
+  ) => {
+    if (!Array.isArray(value) || value.length > allowedIds.size) {
+      throw new Error(
+        `AI search-query review returned an invalid ${system} ID count.`,
+      );
+    }
+
+    const seenIds = new Set<string>();
+
+    for (const id of value) {
+      if (
+        typeof id !== "string" ||
+        !allowedIds.has(id) ||
+        seenIds.has(id)
+      ) {
+        throw new Error(
+          `AI search-query review returned an unsupported or duplicate ${system} ID.`,
+        );
+      }
+
+      seenIds.add(id);
+    }
+  };
+
+  validateCodeIds(selection.ipc_code_ids, allowedIpcIds, "IPC");
+  validateCodeIds(selection.cpc_code_ids, allowedCpcIds, "CPC");
+}
+
 function buildReviewedSearchQueriesFromIds(
   selection: SearchQueryReviewSelection,
   termOptions: SearchQueryTermOption[],
@@ -1341,33 +1421,43 @@ Return only structured JSON matching the schema.`,
   const selection = JSON.parse(
     response.output_text,
   ) as SearchQueryReviewSelection;
+  assertValidSearchQueryReviewSelection(
+    selection,
+    termOptions,
+    ipcOptions,
+    cpcOptions,
+  );
   const reviewed = buildReviewedSearchQueriesFromIds(
     selection,
     termOptions,
     ipcOptions,
     cpcOptions,
   );
-
-  if (
-    !isValidReviewedKeywordQuery(
-      reviewed.keywordQuery,
-      allowedTerms,
-      candidate.keywordQuery,
-    ) ||
-    !isValidReviewedClassificationQuery(
+  const filteredCandidate = {
+    keywordQuery: candidate.keywordQuery,
+    classificationQuery: buildDomainFilteredClassificationQuery(allowedCodes),
+  };
+  const validReviewedKeywordQuery = isValidReviewedKeywordQuery(
+    reviewed.keywordQuery,
+    allowedTerms,
+    filteredCandidate.keywordQuery,
+  );
+  const validReviewedClassificationQuery =
+    isValidReviewedClassificationQuery(
       reviewed.classificationQuery,
       allowedCodes,
-      candidate.classificationQuery,
-    )
-  ) {
+      filteredCandidate.classificationQuery,
+    );
+
+  if (!validReviewedKeywordQuery || !validReviewedClassificationQuery) {
     throw new Error(
-      "Server-built reviewed query failed deterministic validation.",
+      `Server-built reviewed query failed deterministic validation (keyword=${validReviewedKeywordQuery}, classification=${validReviewedClassificationQuery}).`,
     );
   }
 
   const reviewStatus: SearchQueryReviewStatus =
-    reviewed.keywordQuery === candidate.keywordQuery &&
-    reviewed.classificationQuery === candidate.classificationQuery
+    reviewed.keywordQuery === filteredCandidate.keywordQuery &&
+    reviewed.classificationQuery === filteredCandidate.classificationQuery
       ? "accepted"
       : "corrected";
 
@@ -1890,6 +1980,11 @@ function validateAnalysisReadyForCharge(
   const candidateSearchQueries = buildCandidateSearchQueryStarter(result);
   const allowedQueryTerms = allowedSearchQueryTerms(result);
   const allowedQueryCodes = allowedSearchQueryCodes(result);
+  const filteredCandidateSearchQueries = {
+    keywordQuery: candidateSearchQueries.keywordQuery,
+    classificationQuery:
+      buildDomainFilteredClassificationQuery(allowedQueryCodes),
+  };
   const validSearchQueryStarter = Boolean(
     result.search_query_starter &&
       (result.search_query_starter.reviewStatus === "accepted" ||
@@ -1898,12 +1993,12 @@ function validateAnalysisReadyForCharge(
       isValidReviewedKeywordQuery(
         result.search_query_starter.keywordQuery,
         allowedQueryTerms,
-        candidateSearchQueries.keywordQuery,
+        filteredCandidateSearchQueries.keywordQuery,
       ) &&
       isValidReviewedClassificationQuery(
         result.search_query_starter.classificationQuery,
         allowedQueryCodes,
-        candidateSearchQueries.classificationQuery,
+        filteredCandidateSearchQueries.classificationQuery,
       ),
   );
 

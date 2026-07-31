@@ -208,7 +208,9 @@ const MAX_SELECTED_F_TERM_THEMES = 2;
 const MAX_SELECTED_F_TERMS = 3;
 const MAX_QUERY_KEYWORD_GROUPS = 5;
 const MAX_QUERY_TERMS_PER_GROUP = 3;
-const ANALYSIS_SCHEMA_VERSION = "concept-rationale-v4";
+// search_query_starter is an additive field under v3 so the currently
+// deployed v3 frontend can safely ignore it while the backend is rolled out.
+const ANALYSIS_SCHEMA_VERSION = "concept-rationale-v3";
 const MODEL = Deno.env.get("OPENAI_MODEL") ?? "gpt-4.1-mini";
 const REQUIRED_DATABASE_FUNCTIONS = [
   "consume_analysis_credit_once_v2",

@@ -3,6 +3,10 @@ import {
   createClient,
   type SupabaseClient,
 } from "npm:@supabase/supabase-js@^2.44.4";
+import {
+  filterClassificationCodesByDomain,
+  type SearchQueryDomainCandidate,
+} from "./searchQueryDomain.ts";
 
 type Confidence = "high" | "medium" | "low";
 type PatentLanguage = "en" | "ja";
@@ -850,7 +854,22 @@ function allowedSearchQueryCodes(
       .filter(Boolean);
   }
 
-  return codes;
+  const domainCandidates: SearchQueryDomainCandidate[] = (
+    ["IPC", "CPC"] as const
+  ).flatMap((system) =>
+    codes[system].map((code) => ({
+      system,
+      code,
+      ...titleForSearchQueryCode(result, system, code),
+    })),
+  );
+
+  return filterClassificationCodesByDomain(domainCandidates, {
+    object_or_system: result.technical_concept.object_or_system,
+    application_or_use: result.technical_concept.application_or_use,
+    context_terms: result.technical_concept.context_terms,
+    search_phrases: result.technical_concept.search_phrases,
+  }).codes;
 }
 
 function isValidReviewedKeywordQuery(
@@ -1266,6 +1285,7 @@ Keyword selection rules:
 
 Classification selection rules:
 - Select only IPC and CPC IDs whose supplied titles materially match the technical concept.
+- Every supplied classification ID has already passed the server's dominant-domain gate.
 - Remove remote or merely lexical classifications.
 - Empty IPC or CPC selections are permitted when that system has no sufficiently relevant candidate.
 

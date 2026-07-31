@@ -32,7 +32,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 type PlanId = "test" | "business";
-const EXPECTED_ANALYSIS_SCHEMA_VERSION = "concept-rationale-v4";
+const EXPECTED_ANALYSIS_SCHEMA_VERSION = "concept-rationale-v3";
 const MAX_INPUT_CHARACTERS = 10_000;
 const TERMS_ACCEPTED_KEY = "kcr_terms_accepted";
 const PENDING_USER_CONSENT_KEY = "kcr_pending_user_consent_v1";
@@ -1502,7 +1502,7 @@ export default function App() {
         )
       ) {
         throw new Error(
-          "The deployed analyze Edge Function is outdated. Deploy the matching analyze/index.ts that returns concept-rationale-v4 with AI-reviewed search queries.",
+          "The deployed analyze Edge Function is outdated. Deploy the matching analyze/index.ts that returns concept-rationale-v3 with AI-reviewed search queries.",
         );
       }
 

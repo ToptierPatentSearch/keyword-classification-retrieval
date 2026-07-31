@@ -61,6 +61,14 @@ export default function SearchQueryStarter({
 }: SearchQueryStarterProps) {
   const [copiedQuery, setCopiedQuery] = useState<QueryType | null>(null);
   const [copyError, setCopyError] = useState("");
+  const reviewLabel =
+    starter.reviewStatus === "corrected"
+      ? "AI corrected"
+      : starter.reviewStatus === "accepted"
+        ? "AI reviewed"
+        : starter.reviewStatus === "demo"
+          ? "Pre-reviewed demo"
+          : "Review unavailable";
 
   async function handleCopy(queryType: QueryType, query: string) {
     if (!query) {
@@ -99,7 +107,14 @@ export default function SearchQueryStarter({
             Generated Search Query Starter
           </h2>
         </span>
-        <span className="query-credit-note">No additional credit</span>
+        <span className="query-starter-badges">
+          <span
+            className={`query-review-note ${starter.reviewStatus}`}
+          >
+            {reviewLabel}
+          </span>
+          <span className="query-credit-note">No additional credit</span>
+        </span>
       </div>
 
       <div className="query-starter-grid">
@@ -119,6 +134,7 @@ export default function SearchQueryStarter({
         />
       </div>
 
+      <p className="query-review-summary">{starter.reviewSummary}</p>
       <p className="query-starter-notice">{SEARCH_QUERY_REVIEW_NOTICE}</p>
       {copyError && (
         <p className="query-copy-error" role="alert">

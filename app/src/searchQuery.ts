@@ -13,6 +13,8 @@ export const SEARCH_QUERY_REVIEW_NOTICE =
 export type GeneratedSearchQueryStarter = {
   keywordQuery: string;
   classificationQuery: string;
+  reviewStatus: "accepted" | "corrected" | "demo" | "unreviewed";
+  reviewSummary: string;
 };
 
 function cleanQueryValue(value: string | null | undefined): string {
@@ -121,6 +123,20 @@ function buildClassificationQuery(result: AnalysisResult): string {
 export function buildSearchQueryStarter(
   result: AnalysisResult,
 ): GeneratedSearchQueryStarter {
+  if (
+    result.search_query_starter &&
+    (result.search_query_starter.reviewStatus === "accepted" ||
+      result.search_query_starter.reviewStatus === "corrected")
+  ) {
+    return {
+      keywordQuery: result.search_query_starter.keywordQuery,
+      classificationQuery:
+        result.search_query_starter.classificationQuery,
+      reviewStatus: result.search_query_starter.reviewStatus,
+      reviewSummary: result.search_query_starter.reviewSummary,
+    };
+  }
+
   const keywordGroups = (Array.isArray(result.keywords)
     ? result.keywords
     : []
@@ -134,5 +150,8 @@ export function buildSearchQueryStarter(
   return {
     keywordQuery: keywordGroups.join(" AND "),
     classificationQuery: buildClassificationQuery(result),
+    reviewStatus: "unreviewed",
+    reviewSummary:
+      "AI review was not included in this analysis result. Verify and refine the query before use.",
   };
 }

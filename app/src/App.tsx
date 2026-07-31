@@ -1482,6 +1482,10 @@ export default function App() {
       if (
         data.analysisSchemaVersion !== EXPECTED_ANALYSIS_SCHEMA_VERSION ||
         !data.technical_concept ||
+        !data.search_query_starter ||
+        (data.search_query_starter.reviewStatus !== "accepted" &&
+          data.search_query_starter.reviewStatus !== "corrected") ||
+        !data.search_query_starter.reviewSummary ||
         !Array.isArray(data.keywords) ||
         data.keywords.some(
           (keyword: KeywordClassification) =>
@@ -1498,7 +1502,7 @@ export default function App() {
         )
       ) {
         throw new Error(
-          "The deployed analyze Edge Function is outdated. Deploy the matching index(48).ts that returns concept-rationale-v3.",
+          "The deployed analyze Edge Function is outdated. Deploy the matching analyze/index.ts that returns concept-rationale-v3 with AI-reviewed search queries.",
         );
       }
 

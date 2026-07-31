@@ -14,20 +14,23 @@ export interface SearchQueryDomainConcept {
   search_phrases: string[];
 }
 
-export function buildDomainFilteredClassificationQuery(
+export function buildGooglePatentsCpcQuery(
   codes: Record<SearchQueryDomainSystem, string[]>,
 ): string {
-  const parts: string[] = [];
+  const compactCodes = Array.from(
+    new Set(
+      codes.CPC
+        .map((code) =>
+          code.normalize("NFKC").toUpperCase().replace(/[^A-Z0-9/]/g, ""),
+        )
+        .filter(Boolean),
+    ),
+  ).sort((a, b) => a.localeCompare(b));
 
-  if (codes.IPC.length > 0) {
-    parts.push(`IPC=(${codes.IPC.join(" OR ")})`);
-  }
+  if (compactCodes.length === 0) return "";
+  if (compactCodes.length === 1) return `CPC=${compactCodes[0]}`;
 
-  if (codes.CPC.length > 0) {
-    parts.push(`CPC=(${codes.CPC.join(" OR ")})`);
-  }
-
-  return parts.join(" OR ");
+  return `(${compactCodes.map((code) => `CPC=${code}`).join(" OR ")})`;
 }
 
 interface DomainPrefixScore {

@@ -3,12 +3,16 @@ import type {
   ClassificationCodeEvidence,
   KeywordClassification,
 } from "./types";
+import {
+  buildGooglePatentsCpcQuery,
+  normalizeGooglePatentsClassificationQuery,
+} from "./googlePatentsQuery";
 
 const MAX_KEYWORD_GROUPS = 5;
 const MAX_TERMS_PER_GROUP = 3;
 
 export const SEARCH_QUERY_REVIEW_NOTICE =
-  "Starting point for professional review. Patent-database field syntax varies; refine the query, verify the current classification scope, and validate the results in the selected official patent database.";
+  "Formatted for Google Patents Advanced Search. Treat this as a starting point: refine the query, verify the current CPC scope, and validate the retrieved results before relying on them.";
 
 export type GeneratedSearchQueryStarter = {
   keywordQuery: string;
@@ -75,7 +79,6 @@ function addVerifiedEvidence(
 }
 
 function buildClassificationQuery(result: AnalysisResult): string {
-  const ipcCodes = new Set<string>();
   const cpcCodes = new Set<string>();
 
   for (const keyword of Array.isArray(result.keywords)
@@ -88,36 +91,15 @@ function buildClassificationQuery(result: AnalysisResult): string {
         continue;
       }
 
-      if (area.system === "IPC") {
-        ipcCodes.add(code);
-      } else if (area.system === "CPC") {
+      if (area.system === "CPC") {
         cpcCodes.add(code);
       }
     }
 
-    addVerifiedEvidence(ipcCodes, keyword.ipc_evidence);
     addVerifiedEvidence(cpcCodes, keyword.cpc_evidence);
   }
 
-  const queryParts: string[] = [];
-
-  if (ipcCodes.size > 0) {
-    queryParts.push(
-      `IPC=(${Array.from(ipcCodes)
-        .sort((a, b) => a.localeCompare(b))
-        .join(" OR ")})`,
-    );
-  }
-
-  if (cpcCodes.size > 0) {
-    queryParts.push(
-      `CPC=(${Array.from(cpcCodes)
-        .sort((a, b) => a.localeCompare(b))
-        .join(" OR ")})`,
-    );
-  }
-
-  return queryParts.join(" OR ");
+  return buildGooglePatentsCpcQuery(Array.from(cpcCodes));
 }
 
 export function buildSearchQueryStarter(
@@ -131,7 +113,9 @@ export function buildSearchQueryStarter(
     return {
       keywordQuery: result.search_query_starter.keywordQuery,
       classificationQuery:
-        result.search_query_starter.classificationQuery,
+        normalizeGooglePatentsClassificationQuery(
+          result.search_query_starter.classificationQuery,
+        ),
       reviewStatus: result.search_query_starter.reviewStatus,
       reviewSummary: result.search_query_starter.reviewSummary,
     };

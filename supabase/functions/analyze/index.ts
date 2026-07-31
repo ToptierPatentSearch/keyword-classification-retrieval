@@ -370,16 +370,6 @@ const responseSchema = {
   },
 } as const;
 
-const searchQueryReviewSchema = {
-  type: "object",
-  additionalProperties: false,
-  required: ["keyword_query", "classification_query"],
-  properties: {
-    keyword_query: { type: "string", maxLength: 4000 },
-    classification_query: { type: "string", maxLength: 2000 },
-  },
-} as const;
-
 function jsonResponse(body: unknown, init: ResponseInit = {}) {
   return new Response(JSON.stringify(body), {
     ...init,
@@ -743,10 +733,10 @@ function uniqueSearchQueryValues(values: unknown[]): string[] {
   return unique;
 }
 
-function buildCandidateSearchQueryStarter(
+function buildCandidateSearchQueryTermGroups(
   result: AnalysisResult,
-): Pick<SearchQueryStarter, "keywordQuery" | "classificationQuery"> {
-  const keywordQuery = result.keywords
+): string[][] {
+  return result.keywords
     .slice()
     .sort((a, b) => a.rank - b.rank)
     .slice(0, MAX_QUERY_KEYWORD_GROUPS)
@@ -757,7 +747,13 @@ function buildCandidateSearchQueryStarter(
         ...keyword.synonyms,
       ]).slice(0, MAX_QUERY_TERMS_PER_GROUP),
     )
-    .filter((terms) => terms.length > 0)
+    .filter((terms) => terms.length > 0);
+}
+
+function buildCandidateSearchQueryStarter(
+  result: AnalysisResult,
+): Pick<SearchQueryStarter, "keywordQuery" | "classificationQuery"> {
+  const keywordQuery = buildCandidateSearchQueryTermGroups(result)
     .map((terms) => `(${terms.map((term) => `"${term}"`).join(" OR ")})`)
     .join(" AND ");
 
@@ -937,7 +933,13 @@ function isValidReviewedClassificationQuery(
     return normalizedQuery === "";
   }
 
-  if (!normalizedQuery || normalizedQuery.length > 2000) {
+  // A completed AI review may withhold all catalog candidates when none is
+  // technically relevant enough to recommend.
+  if (!normalizedQuery) {
+    return true;
+  }
+
+  if (normalizedQuery.length > 2000) {
     return false;
   }
 
@@ -982,6 +984,197 @@ function isValidReviewedClassificationQuery(
   return selectedCodeCount > 0;
 }
 
+interface SearchQueryTermOption {
+  id: string;
+  term: string;
+}
+
+interface SearchQueryCodeOption {
+  id: string;
+  code: string;
+  title_en: string | null;
+  title_ja: string | null;
+}
+
+interface SearchQueryReviewSelection {
+  keyword_groups: Array<{ term_ids: string[] }>;
+  ipc_code_ids: string[];
+  cpc_code_ids: string[];
+}
+
+function searchQueryOptionId(prefix: "T" | "I" | "C", index: number): string {
+  return `${prefix}${String(index + 1).padStart(3, "0")}`;
+}
+
+function titleForSearchQueryCode(
+  result: AnalysisResult,
+  system: "IPC" | "CPC",
+  code: string,
+): { title_en: string | null; title_ja: string | null } {
+  const normalizedCode = normalizeClassificationCode(code);
+
+  for (const keyword of result.keywords) {
+    for (const area of keyword.classification_route?.ipc_cpc_area ?? []) {
+      if (
+        area.system === system &&
+        normalizeClassificationCode(area.code) === normalizedCode
+      ) {
+        return {
+          title_en: area.title_en ?? null,
+          title_ja: area.title_ja ?? null,
+        };
+      }
+    }
+
+    const evidence =
+      system === "IPC" ? keyword.ipc_evidence : keyword.cpc_evidence;
+    const matchedEvidence = evidence?.find(
+      (item) => normalizeClassificationCode(item.code) === normalizedCode,
+    );
+
+    if (matchedEvidence) {
+      return {
+        title_en: matchedEvidence.title_en ?? null,
+        title_ja: matchedEvidence.title_ja ?? null,
+      };
+    }
+  }
+
+  return { title_en: null, title_ja: null };
+}
+
+function searchQueryIdArraySchema(ids: string[]) {
+  return {
+    type: "array",
+    maxItems: ids.length,
+    items:
+      ids.length > 0
+        ? { type: "string", enum: ids }
+        : { type: "string" },
+  };
+}
+
+function buildSearchQueryReviewSchema(
+  termIds: string[],
+  ipcCodeIds: string[],
+  cpcCodeIds: string[],
+) {
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["keyword_groups", "ipc_code_ids", "cpc_code_ids"],
+    properties: {
+      keyword_groups: {
+        type: "array",
+        minItems: 1,
+        maxItems: MAX_QUERY_KEYWORD_GROUPS,
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["term_ids"],
+          properties: {
+            term_ids: {
+              type: "array",
+              minItems: 1,
+              maxItems: MAX_QUERY_TERMS_PER_GROUP,
+              items: { type: "string", enum: termIds },
+            },
+          },
+        },
+      },
+      ipc_code_ids: searchQueryIdArraySchema(ipcCodeIds),
+      cpc_code_ids: searchQueryIdArraySchema(cpcCodeIds),
+    },
+  };
+}
+
+function selectedCodeValues(
+  value: unknown,
+  options: SearchQueryCodeOption[],
+): string[] {
+  const optionsById = new Map(options.map((option) => [option.id, option]));
+  const selectedCodes = new Set<string>();
+
+  for (const id of Array.isArray(value) ? value : []) {
+    if (typeof id !== "string") continue;
+
+    const option = optionsById.get(id);
+    if (option) selectedCodes.add(option.code);
+  }
+
+  return Array.from(selectedCodes).sort((a, b) => a.localeCompare(b));
+}
+
+function buildReviewedSearchQueriesFromIds(
+  selection: SearchQueryReviewSelection,
+  termOptions: SearchQueryTermOption[],
+  ipcOptions: SearchQueryCodeOption[],
+  cpcOptions: SearchQueryCodeOption[],
+): Pick<SearchQueryStarter, "keywordQuery" | "classificationQuery"> {
+  const termsById = new Map(
+    termOptions.map((option) => [option.id, option.term]),
+  );
+  const seenTermIds = new Set<string>();
+  const keywordGroups: string[][] = [];
+
+  for (const group of Array.isArray(selection.keyword_groups)
+    ? selection.keyword_groups
+    : []) {
+    const selectedTerms: string[] = [];
+
+    for (const id of Array.isArray(group?.term_ids) ? group.term_ids : []) {
+      if (
+        typeof id !== "string" ||
+        seenTermIds.has(id) ||
+        !termsById.has(id)
+      ) {
+        continue;
+      }
+
+      seenTermIds.add(id);
+      selectedTerms.push(termsById.get(id)!);
+
+      if (selectedTerms.length >= MAX_QUERY_TERMS_PER_GROUP) {
+        break;
+      }
+    }
+
+    if (selectedTerms.length > 0) {
+      keywordGroups.push(selectedTerms);
+    }
+
+    if (keywordGroups.length >= MAX_QUERY_KEYWORD_GROUPS) {
+      break;
+    }
+  }
+
+  if (keywordGroups.length === 0) {
+    throw new Error(
+      "AI search-query review returned no approved keyword groups.",
+    );
+  }
+
+  const keywordQuery = keywordGroups
+    .map((terms) => `(${terms.map((term) => `"${term}"`).join(" OR ")})`)
+    .join(" AND ");
+  const ipcCodes = selectedCodeValues(selection.ipc_code_ids, ipcOptions);
+  const cpcCodes = selectedCodeValues(selection.cpc_code_ids, cpcOptions);
+  const classificationParts: string[] = [];
+
+  if (ipcCodes.length > 0) {
+    classificationParts.push(`IPC=(${ipcCodes.join(" OR ")})`);
+  }
+
+  if (cpcCodes.length > 0) {
+    classificationParts.push(`CPC=(${cpcCodes.join(" OR ")})`);
+  }
+
+  return {
+    keywordQuery,
+    classificationQuery: classificationParts.join(" OR "),
+  };
+}
+
 async function reviewSearchQueriesWithAi(
   result: AnalysisResult,
   apiKey: string,
@@ -989,6 +1182,69 @@ async function reviewSearchQueriesWithAi(
   const candidate = buildCandidateSearchQueryStarter(result);
   const allowedTerms = allowedSearchQueryTerms(result);
   const allowedCodes = allowedSearchQueryCodes(result);
+  const termOptions: SearchQueryTermOption[] = allowedTerms.map(
+    (term, index) => ({
+      id: searchQueryOptionId("T", index),
+      term,
+    }),
+  );
+  const ipcOptions: SearchQueryCodeOption[] = allowedCodes.IPC.map(
+    (code, index) => ({
+      id: searchQueryOptionId("I", index),
+      code,
+      ...titleForSearchQueryCode(result, "IPC", code),
+    }),
+  );
+  const cpcOptions: SearchQueryCodeOption[] = allowedCodes.CPC.map(
+    (code, index) => ({
+      id: searchQueryOptionId("C", index),
+      code,
+      ...titleForSearchQueryCode(result, "CPC", code),
+    }),
+  );
+
+  if (termOptions.length === 0) {
+    throw new Error("No approved terms were available for AI query review.");
+  }
+
+  const termIdByValue = new Map(
+    termOptions.map((option) => [
+      option.term.normalize("NFKC").toLowerCase(),
+      option.id,
+    ]),
+  );
+  const ipcIdByCode = new Map(
+    ipcOptions.map((option) => [
+      normalizeClassificationCode(option.code),
+      option.id,
+    ]),
+  );
+  const cpcIdByCode = new Map(
+    cpcOptions.map((option) => [
+      normalizeClassificationCode(option.code),
+      option.id,
+    ]),
+  );
+  const candidateKeywordGroups = buildCandidateSearchQueryTermGroups(result)
+    .map((terms) => ({
+      term_ids: terms
+        .map((term) =>
+          termIdByValue.get(term.normalize("NFKC").toLowerCase()),
+        )
+        .filter((id): id is string => Boolean(id)),
+    }))
+    .filter((group) => group.term_ids.length > 0);
+  const candidateIpcCodeIds = allowedCodes.IPC
+    .map((code) => ipcIdByCode.get(normalizeClassificationCode(code)))
+    .filter((id): id is string => Boolean(id));
+  const candidateCpcCodeIds = allowedCodes.CPC
+    .map((code) => cpcIdByCode.get(normalizeClassificationCode(code)))
+    .filter((id): id is string => Boolean(id));
+  const reviewSchema = buildSearchQueryReviewSchema(
+    termOptions.map((option) => option.id),
+    ipcOptions.map((option) => option.id),
+    cpcOptions.map((option) => option.id),
+  );
   const client = new OpenAI({ apiKey });
   const response = await client.responses.create({
     model: MODEL,
@@ -998,22 +1254,20 @@ async function reviewSearchQueriesWithAi(
         content: [
           {
             type: "input_text",
-            text: `You review patent-search query starters before they are shown to a user.
-Evaluate the supplied Boolean keyword query and IPC/CPC classification query against the technical concept and ranked keyword evidence.
-Return the candidate unchanged when it is already suitable. Otherwise, return corrected final queries.
+            text: `You review a patent-search query starter before it is shown to a user.
+Select only the supplied option IDs. The server constructs all final query syntax and maps IDs to exact approved terms and database-verified codes.
 
-Keyword-query rules:
-- Use only exact entries from allowed_keyword_terms. Never invent, translate, stem, or rewrite a term.
-- Use 1-${MAX_QUERY_KEYWORD_GROUPS} parenthesized groups joined by AND.
-- Within each group, use 1-${MAX_QUERY_TERMS_PER_GROUP} double-quoted terms joined by OR.
-- Remove redundant, overly generic, or technically unrelated groups, but preserve the essential inventive combination.
-- Do not use NOT, proximity operators, wildcards, field names, or database-specific syntax.
+Keyword selection rules:
+- Return 1-${MAX_QUERY_KEYWORD_GROUPS} keyword_groups.
+- Each group must contain 1-${MAX_QUERY_TERMS_PER_GROUP} term_ids that are retrieval alternatives for one concept.
+- Preserve the essential inventive combination across groups.
+- Remove redundant, overly generic, or technically unrelated terms.
+- Never repeat a term ID in multiple groups.
 
-Classification-query rules:
-- Use only exact database-verified codes supplied in allowed_classification_codes. Never add or rewrite a code.
-- Use only IPC=(code OR code) and CPC=(code OR code) sections, joined by OR.
-- You may remove a code only when the supplied technical concept shows it is materially unrelated.
-- Return an empty classification_query only when the candidate is empty.
+Classification selection rules:
+- Select only IPC and CPC IDs whose supplied titles materially match the technical concept.
+- Remove remote or merely lexical classifications.
+- Empty IPC or CPC selections are permitted when that system has no sufficiently relevant candidate.
 
 Return only structured JSON matching the schema.`,
           },
@@ -1036,11 +1290,15 @@ Return only structured JSON matching the schema.`,
                   normalized_term: keyword.normalized_term,
                   synonyms: keyword.synonyms,
                   reason: keyword.reason,
-                  classification_reason: keyword.classification_reason,
                 })),
-              candidate,
-              allowed_keyword_terms: allowedTerms,
-              allowed_classification_codes: allowedCodes,
+              term_options: termOptions,
+              ipc_options: ipcOptions,
+              cpc_options: cpcOptions,
+              candidate_selection: {
+                keyword_groups: candidateKeywordGroups,
+                ipc_code_ids: candidateIpcCodeIds,
+                cpc_code_ids: candidateCpcCodeIds,
+              },
             }),
           },
         ],
@@ -1049,8 +1307,8 @@ Return only structured JSON matching the schema.`,
     text: {
       format: {
         type: "json_schema",
-        name: "patent_search_query_review",
-        schema: searchQueryReviewSchema,
+        name: "patent_search_query_id_review",
+        schema: reviewSchema,
         strict: true,
       },
     },
@@ -1060,45 +1318,41 @@ Return only structured JSON matching the schema.`,
     throw new Error("OpenAI returned an empty search-query review.");
   }
 
-  const reviewed = JSON.parse(response.output_text) as {
-    keyword_query?: unknown;
-    classification_query?: unknown;
-  };
-  const keywordQuery =
-    typeof reviewed.keyword_query === "string"
-      ? reviewed.keyword_query.trim()
-      : "";
-  const classificationQuery =
-    typeof reviewed.classification_query === "string"
-      ? reviewed.classification_query.trim()
-      : "";
+  const selection = JSON.parse(
+    response.output_text,
+  ) as SearchQueryReviewSelection;
+  const reviewed = buildReviewedSearchQueriesFromIds(
+    selection,
+    termOptions,
+    ipcOptions,
+    cpcOptions,
+  );
 
   if (
     !isValidReviewedKeywordQuery(
-      keywordQuery,
+      reviewed.keywordQuery,
       allowedTerms,
       candidate.keywordQuery,
     ) ||
     !isValidReviewedClassificationQuery(
-      classificationQuery,
+      reviewed.classificationQuery,
       allowedCodes,
       candidate.classificationQuery,
     )
   ) {
     throw new Error(
-      "AI search-query review returned unsupported terms, codes, or Boolean syntax.",
+      "Server-built reviewed query failed deterministic validation.",
     );
   }
 
   const reviewStatus: SearchQueryReviewStatus =
-    keywordQuery === candidate.keywordQuery &&
-    classificationQuery === candidate.classificationQuery
+    reviewed.keywordQuery === candidate.keywordQuery &&
+    reviewed.classificationQuery === candidate.classificationQuery
       ? "accepted"
       : "corrected";
 
   return {
-    keywordQuery,
-    classificationQuery,
+    ...reviewed,
     reviewStatus,
     reviewSummary:
       reviewStatus === "corrected"

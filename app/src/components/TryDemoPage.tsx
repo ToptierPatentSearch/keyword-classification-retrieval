@@ -54,7 +54,7 @@ const DEMO_QUERY_STARTER: GeneratedSearchQueryStarter = {
   keywordQuery:
     '("wireless EV charging" OR "inductive vehicle charging") AND ("coil alignment" OR "coil misalignment correction") AND ("coupling-efficiency optimization" OR "coil temperature protection")',
   classificationQuery:
-    "IPC=(B60L 53/12 OR H02J 50/10) OR CPC=(B60L 53/38)",
+    "(CPC=B60L53/38 OR CPC=H02J50/10)",
   reviewStatus: "demo",
   reviewSummary:
     "This demonstration query was pre-reviewed for technical relevance, Boolean structure, and use of the displayed classification codes.",

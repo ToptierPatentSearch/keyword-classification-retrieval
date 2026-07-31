@@ -4,7 +4,7 @@ import {
   type SupabaseClient,
 } from "npm:@supabase/supabase-js@^2.44.4";
 import {
-  buildDomainFilteredClassificationQuery,
+  buildGooglePatentsCpcQuery,
   filterClassificationCodesByDomain,
   type SearchQueryDomainCandidate,
 } from "./searchQueryDomain.ts";
@@ -878,68 +878,6 @@ function allowedSearchQueryCodes(
   }).codes;
 }
 
-function isValidReviewedClassificationQuery(
-  query: string,
-  allowedCodes: Record<"IPC" | "CPC", string[]>,
-  candidateQuery: string,
-): boolean {
-  const normalizedQuery = query.trim();
-
-  if (!candidateQuery) {
-    return normalizedQuery === "";
-  }
-
-  // A completed AI review may withhold all catalog candidates when none is
-  // technically relevant enough to recommend.
-  if (!normalizedQuery) {
-    return true;
-  }
-
-  if (normalizedQuery.length > 2000) {
-    return false;
-  }
-
-  const sections = normalizedQuery.split(
-    /\s+OR\s+(?=(?:IPC|CPC)\s*=)/i,
-  );
-  const seenSystems = new Set<"IPC" | "CPC">();
-  let selectedCodeCount = 0;
-
-  for (const section of sections) {
-    const match = section.match(/^(IPC|CPC)\s*=\s*\(([^()]*)\)$/i);
-
-    if (!match) {
-      return false;
-    }
-
-    const system = match[1].toUpperCase() as "IPC" | "CPC";
-
-    if (seenSystems.has(system)) {
-      return false;
-    }
-
-    seenSystems.add(system);
-    const allowed = new Set(
-      allowedCodes[system].map(normalizeClassificationCode),
-    );
-    const codes = match[2]
-      .split(/\s+OR\s+/i)
-      .map(cleanSearchQueryValue)
-      .filter(Boolean);
-
-    if (
-      codes.length === 0 ||
-      codes.some((code) => !allowed.has(normalizeClassificationCode(code)))
-    ) {
-      return false;
-    }
-
-    selectedCodeCount += codes.length;
-  }
-
-  return selectedCodeCount > 0;
-}
-
 interface SearchQueryTermOption {
   id: string;
   term: string;
@@ -1177,21 +1115,14 @@ function buildReviewedSearchQueriesFromIds(
   const keywordQuery = keywordGroups
     .map((terms) => `(${terms.map((term) => `"${term}"`).join(" OR ")})`)
     .join(" AND ");
-  const ipcCodes = selectedCodeValues(selection.ipc_code_ids, ipcOptions);
   const cpcCodes = selectedCodeValues(selection.cpc_code_ids, cpcOptions);
-  const classificationParts: string[] = [];
-
-  if (ipcCodes.length > 0) {
-    classificationParts.push(`IPC=(${ipcCodes.join(" OR ")})`);
-  }
-
-  if (cpcCodes.length > 0) {
-    classificationParts.push(`CPC=(${cpcCodes.join(" OR ")})`);
-  }
 
   return {
     keywordQuery,
-    classificationQuery: classificationParts.join(" OR "),
+    classificationQuery: buildGooglePatentsCpcQuery({
+      IPC: [],
+      CPC: cpcCodes,
+    }),
   };
 }
 
@@ -1208,13 +1139,7 @@ async function reviewSearchQueriesWithAi(
       term,
     }),
   );
-  const ipcOptions: SearchQueryCodeOption[] = allowedCodes.IPC.map(
-    (code, index) => ({
-      id: searchQueryOptionId("I", index),
-      code,
-      ...titleForSearchQueryCode(result, "IPC", code),
-    }),
-  );
+  const ipcOptions: SearchQueryCodeOption[] = [];
   const cpcOptions: SearchQueryCodeOption[] = allowedCodes.CPC.map(
     (code, index) => ({
       id: searchQueryOptionId("C", index),
@@ -1233,12 +1158,6 @@ async function reviewSearchQueriesWithAi(
       option.id,
     ]),
   );
-  const ipcIdByCode = new Map(
-    ipcOptions.map((option) => [
-      normalizeClassificationCode(option.code),
-      option.id,
-    ]),
-  );
   const cpcIdByCode = new Map(
     cpcOptions.map((option) => [
       normalizeClassificationCode(option.code),
@@ -1254,9 +1173,7 @@ async function reviewSearchQueriesWithAi(
         .filter((id): id is string => Boolean(id)),
     }))
     .filter((group) => group.term_ids.length > 0);
-  const candidateIpcCodeIds = allowedCodes.IPC
-    .map((code) => ipcIdByCode.get(normalizeClassificationCode(code)))
-    .filter((id): id is string => Boolean(id));
+  const candidateIpcCodeIds: string[] = [];
   const candidateCpcCodeIds = allowedCodes.CPC
     .map((code) => cpcIdByCode.get(normalizeClassificationCode(code)))
     .filter((id): id is string => Boolean(id));
@@ -1285,10 +1202,11 @@ Keyword selection rules:
 - Never repeat a term ID in multiple groups.
 
 Classification selection rules:
-- Select only IPC and CPC IDs whose supplied titles materially match the technical concept.
+- Select only CPC IDs whose supplied titles materially match the technical concept.
 - Every supplied classification ID has already passed the server's dominant-domain gate.
 - Remove remote or merely lexical classifications.
-- Empty IPC or CPC selections are permitted when that system has no sufficiently relevant candidate.
+- The server formats selected CPC IDs for Google Patents Advanced Search.
+- An empty CPC selection is permitted when no sufficiently relevant CPC candidate exists.
 
 Return only structured JSON matching the schema.`,
           },
@@ -1356,20 +1274,8 @@ Return only structured JSON matching the schema.`,
   );
   const filteredCandidate = {
     keywordQuery: candidate.keywordQuery,
-    classificationQuery: buildDomainFilteredClassificationQuery(allowedCodes),
+    classificationQuery: buildGooglePatentsCpcQuery(allowedCodes),
   };
-  const validReviewedClassificationQuery =
-    isValidReviewedClassificationQuery(
-      reviewed.classificationQuery,
-      allowedCodes,
-      filteredCandidate.classificationQuery,
-    );
-
-  if (!validReviewedClassificationQuery) {
-    throw new Error(
-      "Server-built reviewed classification query failed deterministic validation.",
-    );
-  }
 
   const reviewStatus: SearchQueryReviewStatus =
     reviewed.keywordQuery === filteredCandidate.keywordQuery &&
@@ -1896,20 +1802,12 @@ function validateAnalysisReadyForCharge(
     Array.isArray(result.keywords) &&
     result.keywords.length > 0 &&
     result.keywords.length <= 40;
-  const allowedQueryCodes = allowedSearchQueryCodes(result);
-  const filteredCandidateClassificationQuery =
-    buildDomainFilteredClassificationQuery(allowedQueryCodes);
   const validSearchQueryStarter = Boolean(
     result.search_query_starter &&
       validatedSearchQueryStarters.has(result.search_query_starter) &&
       (result.search_query_starter.reviewStatus === "accepted" ||
         result.search_query_starter.reviewStatus === "corrected") &&
-      result.search_query_starter.reviewSummary.trim() &&
-      isValidReviewedClassificationQuery(
-        result.search_query_starter.classificationQuery,
-        allowedQueryCodes,
-        filteredCandidateClassificationQuery,
-      ),
+      result.search_query_starter.reviewSummary.trim(),
   );
 
   const validKeywords =

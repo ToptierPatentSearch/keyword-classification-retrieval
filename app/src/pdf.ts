@@ -224,9 +224,9 @@ export async function downloadAnalysisPdf(
           "No supported keyword query could be generated.",
       ],
       [
-        "IPC/CPC classification query",
+        "Google Patents CPC query",
         searchQueryStarter.classificationQuery ||
-          "No database-verified IPC/CPC codes were available.",
+          "No database-verified CPC codes were available.",
       ],
     ],
     styles: {

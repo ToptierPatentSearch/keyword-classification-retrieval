@@ -126,7 +126,7 @@ export default function SearchQueryStarter({
           onCopy={handleCopy}
         />
         <QueryBlock
-          label="IPC/CPC classification query"
+          label="Google Patents CPC query"
           query={starter.classificationQuery}
           queryType="classification"
           copiedQuery={copiedQuery}

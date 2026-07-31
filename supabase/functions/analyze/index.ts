@@ -166,6 +166,11 @@ interface SearchQueryStarter {
   reviewSummary: string;
 }
 
+// A query starter is charge-eligible only when this Edge Function created the
+// same object after validating the AI's structured term/code ID selection.
+// WeakSet membership is internal and is never serialized into the response.
+const validatedSearchQueryStarters = new WeakSet<SearchQueryStarter>();
+
 interface AnalysisResult {
   language: PatentLanguage;
   technical_concept: TechnicalInterpretation;
@@ -873,75 +878,6 @@ function allowedSearchQueryCodes(
   }).codes;
 }
 
-function isValidReviewedKeywordQuery(
-  query: string,
-  allowedTerms: string[],
-  candidateQuery: string,
-): boolean {
-  const normalizedQuery = query.trim();
-
-  if (!candidateQuery) {
-    return normalizedQuery === "";
-  }
-
-  if (
-    !normalizedQuery ||
-    normalizedQuery.length > 4000 ||
-    !normalizedQuery.startsWith("(") ||
-    !normalizedQuery.endsWith(")")
-  ) {
-    return false;
-  }
-
-  const allowed = new Set(
-    allowedTerms.map((term) => term.normalize("NFKC").toLowerCase()),
-  );
-  const groups = normalizedQuery
-    .slice(1, -1)
-    .split(/\)\s+AND\s+\(/i);
-
-  if (
-    groups.length === 0 ||
-    groups.length > MAX_QUERY_KEYWORD_GROUPS
-  ) {
-    return false;
-  }
-
-  const seenTerms = new Set<string>();
-
-  return groups.every((group) => {
-    const matches = Array.from(group.matchAll(/"([^"]+)"/g));
-    const residue = group
-      .replace(/"[^"]+"/g, "")
-      .replace(/\s+OR\s+/gi, "")
-      .trim();
-
-    if (
-      residue ||
-      matches.length === 0 ||
-      matches.length > MAX_QUERY_TERMS_PER_GROUP
-    ) {
-      return false;
-    }
-
-    return matches.every((match) => {
-      const term = cleanSearchQueryValue(match[1]);
-      const normalizedTerm = term.normalize("NFKC").toLowerCase();
-
-      if (
-        !term ||
-        !allowed.has(normalizedTerm) ||
-        seenTerms.has(normalizedTerm)
-      ) {
-        return false;
-      }
-
-      seenTerms.add(normalizedTerm);
-      return true;
-    });
-  });
-}
-
 function isValidReviewedClassificationQuery(
   query: string,
   allowedCodes: Record<"IPC" | "CPC", string[]>,
@@ -1134,7 +1070,6 @@ function assertValidSearchQueryReviewSelection(
   const allowedTermIds = new Set(termOptions.map((option) => option.id));
   const allowedIpcIds = new Set(ipcOptions.map((option) => option.id));
   const allowedCpcIds = new Set(cpcOptions.map((option) => option.id));
-  const seenTermIds = new Set<string>();
 
   if (
     !Array.isArray(selection.keyword_groups) ||
@@ -1158,17 +1093,11 @@ function assertValidSearchQueryReviewSelection(
     }
 
     for (const id of group.term_ids) {
-      if (
-        typeof id !== "string" ||
-        !allowedTermIds.has(id) ||
-        seenTermIds.has(id)
-      ) {
+      if (typeof id !== "string" || !allowedTermIds.has(id)) {
         throw new Error(
-          "AI search-query review returned an unsupported or duplicate term ID.",
+          "AI search-query review returned an unsupported term ID.",
         );
       }
-
-      seenTermIds.add(id);
     }
   }
 
@@ -1183,20 +1112,12 @@ function assertValidSearchQueryReviewSelection(
       );
     }
 
-    const seenIds = new Set<string>();
-
     for (const id of value) {
-      if (
-        typeof id !== "string" ||
-        !allowedIds.has(id) ||
-        seenIds.has(id)
-      ) {
+      if (typeof id !== "string" || !allowedIds.has(id)) {
         throw new Error(
-          `AI search-query review returned an unsupported or duplicate ${system} ID.`,
+          `AI search-query review returned an unsupported ${system} ID.`,
         );
       }
-
-      seenIds.add(id);
     }
   };
 
@@ -1437,11 +1358,6 @@ Return only structured JSON matching the schema.`,
     keywordQuery: candidate.keywordQuery,
     classificationQuery: buildDomainFilteredClassificationQuery(allowedCodes),
   };
-  const validReviewedKeywordQuery = isValidReviewedKeywordQuery(
-    reviewed.keywordQuery,
-    allowedTerms,
-    filteredCandidate.keywordQuery,
-  );
   const validReviewedClassificationQuery =
     isValidReviewedClassificationQuery(
       reviewed.classificationQuery,
@@ -1449,9 +1365,9 @@ Return only structured JSON matching the schema.`,
       filteredCandidate.classificationQuery,
     );
 
-  if (!validReviewedKeywordQuery || !validReviewedClassificationQuery) {
+  if (!validReviewedClassificationQuery) {
     throw new Error(
-      `Server-built reviewed query failed deterministic validation (keyword=${validReviewedKeywordQuery}, classification=${validReviewedClassificationQuery}).`,
+      "Server-built reviewed classification query failed deterministic validation.",
     );
   }
 
@@ -1461,7 +1377,7 @@ Return only structured JSON matching the schema.`,
       ? "accepted"
       : "corrected";
 
-  return {
+  const starter: SearchQueryStarter = {
     ...reviewed,
     reviewStatus,
     reviewSummary:
@@ -1469,6 +1385,9 @@ Return only structured JSON matching the schema.`,
         ? "AI reviewed and corrected the query structure or term selection before display."
         : "AI reviewed the generated queries and found no correction necessary.",
   };
+
+  validatedSearchQueryStarters.add(starter);
+  return starter;
 }
 
 function cleanTextList(value: unknown, limit: number): string[] {
@@ -1977,28 +1896,19 @@ function validateAnalysisReadyForCharge(
     Array.isArray(result.keywords) &&
     result.keywords.length > 0 &&
     result.keywords.length <= 40;
-  const candidateSearchQueries = buildCandidateSearchQueryStarter(result);
-  const allowedQueryTerms = allowedSearchQueryTerms(result);
   const allowedQueryCodes = allowedSearchQueryCodes(result);
-  const filteredCandidateSearchQueries = {
-    keywordQuery: candidateSearchQueries.keywordQuery,
-    classificationQuery:
-      buildDomainFilteredClassificationQuery(allowedQueryCodes),
-  };
+  const filteredCandidateClassificationQuery =
+    buildDomainFilteredClassificationQuery(allowedQueryCodes);
   const validSearchQueryStarter = Boolean(
     result.search_query_starter &&
+      validatedSearchQueryStarters.has(result.search_query_starter) &&
       (result.search_query_starter.reviewStatus === "accepted" ||
         result.search_query_starter.reviewStatus === "corrected") &&
       result.search_query_starter.reviewSummary.trim() &&
-      isValidReviewedKeywordQuery(
-        result.search_query_starter.keywordQuery,
-        allowedQueryTerms,
-        filteredCandidateSearchQueries.keywordQuery,
-      ) &&
       isValidReviewedClassificationQuery(
         result.search_query_starter.classificationQuery,
         allowedQueryCodes,
-        filteredCandidateSearchQueries.classificationQuery,
+        filteredCandidateClassificationQuery,
       ),
   );
 

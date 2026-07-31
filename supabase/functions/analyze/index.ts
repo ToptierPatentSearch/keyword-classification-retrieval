@@ -152,10 +152,20 @@ interface KeywordClassification {
   classification_reason: string;
 }
 
+type SearchQueryReviewStatus = "accepted" | "corrected";
+
+interface SearchQueryStarter {
+  keywordQuery: string;
+  classificationQuery: string;
+  reviewStatus: SearchQueryReviewStatus;
+  reviewSummary: string;
+}
+
 interface AnalysisResult {
   language: PatentLanguage;
   technical_concept: TechnicalInterpretation;
   keywords: KeywordClassification[];
+  search_query_starter?: SearchQueryStarter;
   analysisSchemaVersion?: string;
   warning?: string;
   requestId?: string;
@@ -196,7 +206,9 @@ const MAX_SELECTED_AREAS_PER_SYSTEM = 2;
 const MAX_SELECTED_FI = 2;
 const MAX_SELECTED_F_TERM_THEMES = 2;
 const MAX_SELECTED_F_TERMS = 3;
-const ANALYSIS_SCHEMA_VERSION = "concept-rationale-v3";
+const MAX_QUERY_KEYWORD_GROUPS = 5;
+const MAX_QUERY_TERMS_PER_GROUP = 3;
+const ANALYSIS_SCHEMA_VERSION = "concept-rationale-v4";
 const MODEL = Deno.env.get("OPENAI_MODEL") ?? "gpt-4.1-mini";
 const REQUIRED_DATABASE_FUNCTIONS = [
   "consume_analysis_credit_once_v2",
@@ -353,6 +365,16 @@ const responseSchema = {
         },
       },
     },
+  },
+} as const;
+
+const searchQueryReviewSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["keyword_query", "classification_query"],
+  properties: {
+    keyword_query: { type: "string", maxLength: 4000 },
+    classification_query: { type: "string", maxLength: 2000 },
   },
 } as const;
 
@@ -692,6 +714,395 @@ function uniqueCodes(codes: unknown): string[] {
   }
 
   return unique;
+}
+
+function cleanSearchQueryValue(value: unknown): string {
+  return typeof value === "string"
+    ? value.replace(/["“”]/g, " ").replace(/\s+/g, " ").trim()
+    : "";
+}
+
+function uniqueSearchQueryValues(values: unknown[]): string[] {
+  const seen = new Set<string>();
+  const unique: string[] = [];
+
+  for (const value of values) {
+    const cleanedValue = cleanSearchQueryValue(value);
+    const comparisonValue = cleanedValue.normalize("NFKC").toLowerCase();
+
+    if (!cleanedValue || seen.has(comparisonValue)) {
+      continue;
+    }
+
+    seen.add(comparisonValue);
+    unique.push(cleanedValue);
+  }
+
+  return unique;
+}
+
+function buildCandidateSearchQueryStarter(
+  result: AnalysisResult,
+): Pick<SearchQueryStarter, "keywordQuery" | "classificationQuery"> {
+  const keywordQuery = result.keywords
+    .slice()
+    .sort((a, b) => a.rank - b.rank)
+    .slice(0, MAX_QUERY_KEYWORD_GROUPS)
+    .map((keyword) =>
+      uniqueSearchQueryValues([
+        keyword.normalized_term,
+        keyword.term,
+        ...keyword.synonyms,
+      ]).slice(0, MAX_QUERY_TERMS_PER_GROUP),
+    )
+    .filter((terms) => terms.length > 0)
+    .map((terms) => `(${terms.map((term) => `"${term}"`).join(" OR ")})`)
+    .join(" AND ");
+
+  const ipcCodes = new Set<string>();
+  const cpcCodes = new Set<string>();
+
+  for (const keyword of result.keywords) {
+    for (const area of keyword.classification_route?.ipc_cpc_area ?? []) {
+      const code = cleanSearchQueryValue(area.code);
+
+      if (!code || area.status !== "database_verified") {
+        continue;
+      }
+
+      if (area.system === "IPC") {
+        ipcCodes.add(code);
+      } else if (area.system === "CPC") {
+        cpcCodes.add(code);
+      }
+    }
+
+    for (const evidence of keyword.ipc_evidence ?? []) {
+      if (evidence.status === "database_verified") {
+        const code = cleanSearchQueryValue(evidence.code);
+        if (code) ipcCodes.add(code);
+      }
+    }
+
+    for (const evidence of keyword.cpc_evidence ?? []) {
+      if (evidence.status === "database_verified") {
+        const code = cleanSearchQueryValue(evidence.code);
+        if (code) cpcCodes.add(code);
+      }
+    }
+  }
+
+  const classificationParts: string[] = [];
+
+  if (ipcCodes.size > 0) {
+    classificationParts.push(
+      `IPC=(${Array.from(ipcCodes)
+        .sort((a, b) => a.localeCompare(b))
+        .join(" OR ")})`,
+    );
+  }
+
+  if (cpcCodes.size > 0) {
+    classificationParts.push(
+      `CPC=(${Array.from(cpcCodes)
+        .sort((a, b) => a.localeCompare(b))
+        .join(" OR ")})`,
+    );
+  }
+
+  return {
+    keywordQuery,
+    classificationQuery: classificationParts.join(" OR "),
+  };
+}
+
+function allowedSearchQueryTerms(result: AnalysisResult): string[] {
+  const keywordTerms = result.keywords
+    .slice()
+    .sort((a, b) => a.rank - b.rank)
+    .slice(0, CANDIDATE_KEYWORD_LIMIT)
+    .flatMap((keyword) => [
+      keyword.normalized_term,
+      keyword.term,
+      ...keyword.synonyms,
+    ]);
+
+  return uniqueSearchQueryValues([
+    ...keywordTerms,
+    ...result.technical_concept.search_phrases,
+  ]);
+}
+
+function allowedSearchQueryCodes(
+  result: AnalysisResult,
+): Record<"IPC" | "CPC", string[]> {
+  const candidate = buildCandidateSearchQueryStarter(result);
+  const codes: Record<"IPC" | "CPC", string[]> = { IPC: [], CPC: [] };
+
+  for (const section of candidate.classificationQuery.split(
+    /\s+OR\s+(?=(?:IPC|CPC)\s*=)/i,
+  )) {
+    const match = section.match(/^(IPC|CPC)\s*=\s*\(([^()]*)\)$/i);
+    if (!match) continue;
+
+    const system = match[1].toUpperCase() as "IPC" | "CPC";
+    codes[system] = match[2]
+      .split(/\s+OR\s+/i)
+      .map(cleanSearchQueryValue)
+      .filter(Boolean);
+  }
+
+  return codes;
+}
+
+function isValidReviewedKeywordQuery(
+  query: string,
+  allowedTerms: string[],
+  candidateQuery: string,
+): boolean {
+  const normalizedQuery = query.trim();
+
+  if (!candidateQuery) {
+    return normalizedQuery === "";
+  }
+
+  if (
+    !normalizedQuery ||
+    normalizedQuery.length > 4000 ||
+    !normalizedQuery.startsWith("(") ||
+    !normalizedQuery.endsWith(")")
+  ) {
+    return false;
+  }
+
+  const allowed = new Set(
+    allowedTerms.map((term) => term.normalize("NFKC").toLowerCase()),
+  );
+  const groups = normalizedQuery
+    .slice(1, -1)
+    .split(/\)\s+AND\s+\(/i);
+
+  if (
+    groups.length === 0 ||
+    groups.length > MAX_QUERY_KEYWORD_GROUPS
+  ) {
+    return false;
+  }
+
+  const seenTerms = new Set<string>();
+
+  return groups.every((group) => {
+    const matches = Array.from(group.matchAll(/"([^"]+)"/g));
+    const residue = group
+      .replace(/"[^"]+"/g, "")
+      .replace(/\s+OR\s+/gi, "")
+      .trim();
+
+    if (
+      residue ||
+      matches.length === 0 ||
+      matches.length > MAX_QUERY_TERMS_PER_GROUP
+    ) {
+      return false;
+    }
+
+    return matches.every((match) => {
+      const term = cleanSearchQueryValue(match[1]);
+      const normalizedTerm = term.normalize("NFKC").toLowerCase();
+
+      if (
+        !term ||
+        !allowed.has(normalizedTerm) ||
+        seenTerms.has(normalizedTerm)
+      ) {
+        return false;
+      }
+
+      seenTerms.add(normalizedTerm);
+      return true;
+    });
+  });
+}
+
+function isValidReviewedClassificationQuery(
+  query: string,
+  allowedCodes: Record<"IPC" | "CPC", string[]>,
+  candidateQuery: string,
+): boolean {
+  const normalizedQuery = query.trim();
+
+  if (!candidateQuery) {
+    return normalizedQuery === "";
+  }
+
+  if (!normalizedQuery || normalizedQuery.length > 2000) {
+    return false;
+  }
+
+  const sections = normalizedQuery.split(
+    /\s+OR\s+(?=(?:IPC|CPC)\s*=)/i,
+  );
+  const seenSystems = new Set<"IPC" | "CPC">();
+  let selectedCodeCount = 0;
+
+  for (const section of sections) {
+    const match = section.match(/^(IPC|CPC)\s*=\s*\(([^()]*)\)$/i);
+
+    if (!match) {
+      return false;
+    }
+
+    const system = match[1].toUpperCase() as "IPC" | "CPC";
+
+    if (seenSystems.has(system)) {
+      return false;
+    }
+
+    seenSystems.add(system);
+    const allowed = new Set(
+      allowedCodes[system].map(normalizeClassificationCode),
+    );
+    const codes = match[2]
+      .split(/\s+OR\s+/i)
+      .map(cleanSearchQueryValue)
+      .filter(Boolean);
+
+    if (
+      codes.length === 0 ||
+      codes.some((code) => !allowed.has(normalizeClassificationCode(code)))
+    ) {
+      return false;
+    }
+
+    selectedCodeCount += codes.length;
+  }
+
+  return selectedCodeCount > 0;
+}
+
+async function reviewSearchQueriesWithAi(
+  result: AnalysisResult,
+  apiKey: string,
+): Promise<SearchQueryStarter> {
+  const candidate = buildCandidateSearchQueryStarter(result);
+  const allowedTerms = allowedSearchQueryTerms(result);
+  const allowedCodes = allowedSearchQueryCodes(result);
+  const client = new OpenAI({ apiKey });
+  const response = await client.responses.create({
+    model: MODEL,
+    input: [
+      {
+        role: "system",
+        content: [
+          {
+            type: "input_text",
+            text: `You review patent-search query starters before they are shown to a user.
+Evaluate the supplied Boolean keyword query and IPC/CPC classification query against the technical concept and ranked keyword evidence.
+Return the candidate unchanged when it is already suitable. Otherwise, return corrected final queries.
+
+Keyword-query rules:
+- Use only exact entries from allowed_keyword_terms. Never invent, translate, stem, or rewrite a term.
+- Use 1-${MAX_QUERY_KEYWORD_GROUPS} parenthesized groups joined by AND.
+- Within each group, use 1-${MAX_QUERY_TERMS_PER_GROUP} double-quoted terms joined by OR.
+- Remove redundant, overly generic, or technically unrelated groups, but preserve the essential inventive combination.
+- Do not use NOT, proximity operators, wildcards, field names, or database-specific syntax.
+
+Classification-query rules:
+- Use only exact database-verified codes supplied in allowed_classification_codes. Never add or rewrite a code.
+- Use only IPC=(code OR code) and CPC=(code OR code) sections, joined by OR.
+- You may remove a code only when the supplied technical concept shows it is materially unrelated.
+- Return an empty classification_query only when the candidate is empty.
+
+Return only structured JSON matching the schema.`,
+          },
+        ],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: JSON.stringify({
+              technical_concept: result.technical_concept,
+              ranked_keywords: result.keywords
+                .slice()
+                .sort((a, b) => a.rank - b.rank)
+                .slice(0, CANDIDATE_KEYWORD_LIMIT)
+                .map((keyword) => ({
+                  rank: keyword.rank,
+                  term: keyword.term,
+                  normalized_term: keyword.normalized_term,
+                  synonyms: keyword.synonyms,
+                  reason: keyword.reason,
+                  classification_reason: keyword.classification_reason,
+                })),
+              candidate,
+              allowed_keyword_terms: allowedTerms,
+              allowed_classification_codes: allowedCodes,
+            }),
+          },
+        ],
+      },
+    ],
+    text: {
+      format: {
+        type: "json_schema",
+        name: "patent_search_query_review",
+        schema: searchQueryReviewSchema,
+        strict: true,
+      },
+    },
+  });
+
+  if (!response.output_text) {
+    throw new Error("OpenAI returned an empty search-query review.");
+  }
+
+  const reviewed = JSON.parse(response.output_text) as {
+    keyword_query?: unknown;
+    classification_query?: unknown;
+  };
+  const keywordQuery =
+    typeof reviewed.keyword_query === "string"
+      ? reviewed.keyword_query.trim()
+      : "";
+  const classificationQuery =
+    typeof reviewed.classification_query === "string"
+      ? reviewed.classification_query.trim()
+      : "";
+
+  if (
+    !isValidReviewedKeywordQuery(
+      keywordQuery,
+      allowedTerms,
+      candidate.keywordQuery,
+    ) ||
+    !isValidReviewedClassificationQuery(
+      classificationQuery,
+      allowedCodes,
+      candidate.classificationQuery,
+    )
+  ) {
+    throw new Error(
+      "AI search-query review returned unsupported terms, codes, or Boolean syntax.",
+    );
+  }
+
+  const reviewStatus: SearchQueryReviewStatus =
+    keywordQuery === candidate.keywordQuery &&
+    classificationQuery === candidate.classificationQuery
+      ? "accepted"
+      : "corrected";
+
+  return {
+    keywordQuery,
+    classificationQuery,
+    reviewStatus,
+    reviewSummary:
+      reviewStatus === "corrected"
+        ? "AI reviewed and corrected the query structure or term selection before display."
+        : "AI reviewed the generated queries and found no correction necessary.",
+  };
 }
 
 function cleanTextList(value: unknown, limit: number): string[] {
@@ -1200,6 +1611,25 @@ function validateAnalysisReadyForCharge(
     Array.isArray(result.keywords) &&
     result.keywords.length > 0 &&
     result.keywords.length <= 40;
+  const candidateSearchQueries = buildCandidateSearchQueryStarter(result);
+  const allowedQueryTerms = allowedSearchQueryTerms(result);
+  const allowedQueryCodes = allowedSearchQueryCodes(result);
+  const validSearchQueryStarter = Boolean(
+    result.search_query_starter &&
+      (result.search_query_starter.reviewStatus === "accepted" ||
+        result.search_query_starter.reviewStatus === "corrected") &&
+      result.search_query_starter.reviewSummary.trim() &&
+      isValidReviewedKeywordQuery(
+        result.search_query_starter.keywordQuery,
+        allowedQueryTerms,
+        candidateSearchQueries.keywordQuery,
+      ) &&
+      isValidReviewedClassificationQuery(
+        result.search_query_starter.classificationQuery,
+        allowedQueryCodes,
+        candidateSearchQueries.classificationQuery,
+      ),
+  );
 
   const validKeywords =
     validKeywordCount &&
@@ -1326,7 +1756,8 @@ function validateAnalysisReadyForCharge(
     !validLanguage ||
     !validSchemaVersion ||
     !validTechnicalConcept ||
-    !validKeywords
+    !validKeywords ||
+    !validSearchQueryStarter
   ) {
     throw new HttpError(
       502,
@@ -3068,12 +3499,21 @@ Deno.serve(async (request: Request) => {
       result = await lookupAndRankClassifications(adminClient, aiResult);
       auditStage = "classification_integrity_check";
       await assertCatalogBackedClassificationCodes(adminClient, result);
+
+      auditStage = "search_query_review";
+      result = {
+        ...result,
+        search_query_starter: await reviewSearchQueriesWithAi(result, apiKey),
+      };
     } catch (classificationError) {
-      console.error("Classification lookup failed:", classificationError);
+      console.error(
+        "Classification or search-query review failed:",
+        classificationError,
+      );
 
       throw new HttpError(
         503,
-        "Classification database verification is temporarily unavailable. No credit was consumed.",
+        "Classification verification or AI search-query review is temporarily unavailable. No credit was consumed.",
       );
     }
 

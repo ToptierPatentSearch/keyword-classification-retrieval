@@ -211,6 +211,14 @@ export async function downloadAnalysisPdf(
     ],
     body: [
       [
+        searchQueryStarter.reviewStatus === "corrected"
+          ? "AI query review — corrected"
+          : searchQueryStarter.reviewStatus === "accepted"
+            ? "AI query review — accepted"
+            : "Query review",
+        searchQueryStarter.reviewSummary,
+      ],
+      [
         "Boolean keyword query",
         searchQueryStarter.keywordQuery ||
           "No supported keyword query could be generated.",

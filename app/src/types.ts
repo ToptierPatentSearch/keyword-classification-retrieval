@@ -117,10 +117,20 @@ export interface KeywordClassification {
   classification_reason: string;
 }
 
+export type SearchQueryReviewStatus = "accepted" | "corrected";
+
+export interface ReviewedSearchQueryStarter {
+  keywordQuery: string;
+  classificationQuery: string;
+  reviewStatus: SearchQueryReviewStatus;
+  reviewSummary: string;
+}
+
 export interface AnalysisResult {
   language: PatentLanguage;
   technical_concept: TechnicalInterpretation;
   keywords: KeywordClassification[];
+  search_query_starter?: ReviewedSearchQueryStarter;
   analysisSchemaVersion?: string;
   warning?: string;
   requestId?: string;

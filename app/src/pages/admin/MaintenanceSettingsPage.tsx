@@ -50,7 +50,32 @@ function asErrorMessage(error: unknown): string {
     : "An unexpected administrator maintenance error occurred.";
 }
 
-function toLocalDateTimeInput(value: string | null): string {
+function pad(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+function getBrowserTimeZoneLabel(date = new Date()): string {
+  const timeZone =
+    Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  const offsetMinutes = -date.getTimezoneOffset();
+  const sign = offsetMinutes >= 0 ? "+" : "-";
+  const absoluteOffset = Math.abs(offsetMinutes);
+  const offset = `${sign}${pad(Math.floor(absoluteOffset / 60))}:${pad(
+    absoluteOffset % 60,
+  )}`;
+  const detectedAbbreviation = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    timeZoneName: "short",
+  })
+    .formatToParts(date)
+    .find((part) => part.type === "timeZoneName")?.value;
+  const abbreviation =
+    timeZone === "Asia/Tokyo" ? "JST" : detectedAbbreviation || timeZone;
+
+  return `${timeZone} (${abbreviation}, UTC${offset})`;
+}
+
+function toLocalDateTimeText(value: string | null): string {
   if (!value) {
     return "";
   }
@@ -61,11 +86,39 @@ function toLocalDateTimeInput(value: string | null): string {
     return "";
   }
 
-  const pad = (number: number) => String(number).padStart(2, "0");
-
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
     date.getDate(),
-  )}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  )} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function parseLocalDateTimeText(value: string): Date | null {
+  const match = value
+    .trim()
+    .match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})$/);
+
+  if (!match) {
+    return null;
+  }
+
+  const [, yearText, monthText, dayText, hourText, minuteText] = match;
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
+  const date = new Date(year, month - 1, day, hour, minute, 0, 0);
+
+  if (
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day ||
+    date.getHours() !== hour ||
+    date.getMinutes() !== minute
+  ) {
+    return null;
+  }
+
+  return date;
 }
 
 function formatTimestamp(value: string | null): string {
@@ -94,7 +147,7 @@ function settingsToDraft(settings: RuntimeSettings): MaintenanceDraft {
     maintenanceEnabled: settings.maintenance_enabled,
     title: settings.maintenance_title,
     message: settings.maintenance_message,
-    expectedBackAtLocal: toLocalDateTimeInput(settings.expected_back_at),
+    expectedBackAtLocal: toLocalDateTimeText(settings.expected_back_at),
   };
 }
 
@@ -138,6 +191,12 @@ export default function MaintenanceSettingsPage() {
     useState<RuntimeSettings>(DEFAULT_SETTINGS);
   const [draft, setDraft] = useState<MaintenanceDraft>(() =>
     settingsToDraft(DEFAULT_SETTINGS),
+  );
+
+  const browserTimeZoneLabel = useMemo(() => getBrowserTimeZoneLabel(), []);
+  const previewRestorationDate = useMemo(
+    () => parseLocalDateTimeText(draft.expectedBackAtLocal),
+    [draft.expectedBackAtLocal],
   );
 
   useEffect(() => {
@@ -279,11 +338,13 @@ export default function MaintenanceSettingsPage() {
 
     let expectedBackAt: string | null = null;
 
-    if (draft.maintenanceEnabled && draft.expectedBackAtLocal) {
-      const expectedDate = new Date(draft.expectedBackAtLocal);
+    if (draft.maintenanceEnabled && draft.expectedBackAtLocal.trim()) {
+      const expectedDate = parseLocalDateTimeText(draft.expectedBackAtLocal);
 
-      if (Number.isNaN(expectedDate.getTime())) {
-        setError("Enter a valid expected restoration date and time.");
+      if (!expectedDate) {
+        setError(
+          "Enter the expected restoration time as YYYY-MM-DD HH:MM, for example 2026-08-03 15:30.",
+        );
         return;
       }
 
@@ -528,7 +589,9 @@ export default function MaintenanceSettingsPage() {
                   : "#f0fdf4",
               }}
             >
-              <div style={{ display: "flex", alignItems: "center", gap: "0.8rem" }}>
+              <div
+                style={{ display: "flex", alignItems: "center", gap: "0.8rem" }}
+              >
                 {savedSettings.maintenance_enabled ? (
                   <ShieldAlert color="#c2410c" aria-hidden="true" />
                 ) : (
@@ -552,10 +615,12 @@ export default function MaintenanceSettingsPage() {
                 padding: "1rem",
                 display: "flex",
                 alignItems: "flex-start",
+                justifyContent: "flex-start",
                 gap: "0.75rem",
                 border: "1px solid #cbd5e1",
                 borderRadius: "0.9rem",
                 background: "#f8fafc",
+                cursor: "pointer",
               }}
             >
               <input
@@ -571,9 +636,16 @@ export default function MaintenanceSettingsPage() {
                   }))
                 }
                 disabled={settingsLoading || saving}
-                style={{ marginTop: "0.2rem" }}
+                style={{
+                  width: "1.1rem",
+                  height: "1.1rem",
+                  minWidth: "1.1rem",
+                  flex: "0 0 1.1rem",
+                  margin: "0.2rem 0 0",
+                  padding: 0,
+                }}
               />
-              <span>
+              <span style={{ display: "block" }}>
                 <strong>Publish maintenance announcement</strong>
                 <span
                   className="muted"
@@ -616,7 +688,11 @@ export default function MaintenanceSettingsPage() {
               <label style={{ display: "grid", gap: "0.4rem" }}>
                 Expected restoration time (optional)
                 <input
-                  type="datetime-local"
+                  type="text"
+                  lang="en"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  placeholder="YYYY-MM-DD HH:MM"
                   value={draft.expectedBackAtLocal}
                   onChange={(event) =>
                     setDraft((current) => ({
@@ -624,12 +700,20 @@ export default function MaintenanceSettingsPage() {
                       expectedBackAtLocal: event.target.value,
                     }))
                   }
+                  pattern="[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}"
+                  maxLength={16}
                   disabled={
                     !draft.maintenanceEnabled || settingsLoading || saving
                   }
+                  aria-describedby="maintenance-time-zone-help"
                 />
-                <span className="muted" style={{ fontSize: "0.78rem" }}>
-                  Entered in your browser’s local time zone.
+                <span
+                  id="maintenance-time-zone-help"
+                  className="muted"
+                  style={{ fontSize: "0.78rem" }}
+                >
+                  Browser local time: {browserTimeZoneLabel}. Use YYYY-MM-DD
+                  HH:MM, for example 2026-08-03 15:30.
                 </span>
               </label>
             </div>
@@ -683,7 +767,7 @@ export default function MaintenanceSettingsPage() {
               <p style={{ margin: 0, lineHeight: 1.65 }}>
                 {draft.message.trim() || "Maintenance announcement message"}
               </p>
-              {draft.maintenanceEnabled && draft.expectedBackAtLocal && (
+              {draft.maintenanceEnabled && previewRestorationDate && (
                 <p
                   style={{
                     margin: 0,
@@ -695,7 +779,7 @@ export default function MaintenanceSettingsPage() {
                 >
                   <Clock3 aria-hidden="true" />
                   Expected restoration: {formatTimestamp(
-                    new Date(draft.expectedBackAtLocal).toISOString(),
+                    previewRestorationDate.toISOString(),
                   )}
                 </p>
               )}

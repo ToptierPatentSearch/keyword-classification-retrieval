@@ -290,6 +290,24 @@ export default function MaintenanceSettingsPage() {
     );
   }, [draft, savedSettings]);
 
+  const maintenanceActionLabel = saving
+    ? "Saving…"
+    : savedSettings.maintenance_enabled && !draft.maintenanceEnabled
+      ? "Restore normal operation"
+      : savedSettings.maintenance_enabled && draft.maintenanceEnabled
+        ? "Update maintenance announcement"
+        : draft.maintenanceEnabled
+          ? "Publish maintenance announcement"
+          : "Save maintenance settings";
+
+  const maintenanceToggleTitle = savedSettings.maintenance_enabled
+    ? "Maintenance announcement is active"
+    : "Publish maintenance announcement";
+
+  const maintenanceToggleHelp = savedSettings.maintenance_enabled
+    ? "Leave this selected to update the active announcement. Clear it to restore normal operation."
+    : "When enabled, the public application is replaced by the announcement and analysis requests are rejected without consuming credits.";
+
   async function handleSignIn(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setAuthLoading(true);
@@ -360,11 +378,15 @@ export default function MaintenanceSettingsPage() {
       !savedSettings.maintenance_enabled && draft.maintenanceEnabled;
     const disablingMaintenance =
       savedSettings.maintenance_enabled && !draft.maintenanceEnabled;
+    const updatingMaintenance =
+      savedSettings.maintenance_enabled && draft.maintenanceEnabled;
     const confirmationMessage = enablingMaintenance
       ? "Publish this maintenance announcement now? Analysis will immediately be blocked for all users, while administrators can still use this control page."
       : disablingMaintenance
         ? "Restore normal operation now? The maintenance announcement will be removed and analysis will be available again."
-        : "Save these maintenance announcement settings?";
+        : updatingMaintenance
+          ? "Update the active maintenance announcement now?"
+          : "Save these maintenance announcement settings?";
 
     if (!window.confirm(confirmationMessage)) {
       return;
@@ -402,7 +424,9 @@ export default function MaintenanceSettingsPage() {
       setDraft(settingsToDraft(settings));
       setSuccessMessage(
         settings.maintenance_enabled
-          ? "Maintenance mode is active and the announcement is now published."
+          ? updatingMaintenance
+            ? "The active maintenance announcement has been updated."
+            : "Maintenance mode is active and the announcement is now published."
           : "Normal operation has been restored and the maintenance announcement is no longer active.",
       );
       window.dispatchEvent(new Event("runtime-settings-changed"));
@@ -646,14 +670,12 @@ export default function MaintenanceSettingsPage() {
                 }}
               />
               <span style={{ display: "block" }}>
-                <strong>Publish maintenance announcement</strong>
+                <strong>{maintenanceToggleTitle}</strong>
                 <span
                   className="muted"
                   style={{ display: "block", marginTop: "0.25rem" }}
                 >
-                  When enabled, the public application is replaced by the
-                  announcement and analysis requests are rejected without
-                  consuming credits.
+                  {maintenanceToggleHelp}
                 </span>
               </span>
             </label>
@@ -795,14 +817,7 @@ export default function MaintenanceSettingsPage() {
                 }
               >
                 <Save aria-hidden="true" />
-                {saving
-                  ? "Saving…"
-                  : savedSettings.maintenance_enabled &&
-                      !draft.maintenanceEnabled
-                    ? "Restore normal operation"
-                    : draft.maintenanceEnabled
-                      ? "Publish maintenance announcement"
-                      : "Save maintenance settings"}
+                {maintenanceActionLabel}
               </button>
               {!hasChanges && (
                 <span className="muted">No unsaved changes.</span>

@@ -57,6 +57,24 @@ export default function AdminMaintenanceEntryPoint({
 
   return (
     <>
+      <style>{`
+        .app-header {
+          position: relative;
+          z-index: 100;
+          overflow: visible;
+        }
+
+        .app-header .user-panel,
+        .app-header .admin-menu {
+          position: relative;
+          z-index: 110;
+          overflow: visible;
+        }
+
+        .app-header .admin-menu-popover {
+          z-index: 120;
+        }
+      `}</style>
       {children}
       {administrationMenuTarget &&
         createPortal(

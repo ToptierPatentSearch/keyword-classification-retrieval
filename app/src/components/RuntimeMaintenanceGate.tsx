@@ -128,9 +128,11 @@ function LoadingPage() {
 function MaintenancePage({
   settings,
   onAdministratorAccess,
+  showAdministratorAccess,
 }: {
   settings: RuntimeSettings;
   onAdministratorAccess: () => void;
+  showAdministratorAccess: boolean;
 }) {
   const expectedBackAt = formatExpectedBackAt(settings.expected_back_at);
 
@@ -222,27 +224,29 @@ function MaintenancePage({
         Analysis requests are blocked at the server while maintenance mode is
         active, so no analysis credit will be consumed.
       </p>
-      <button
-        type="button"
-        onClick={onAdministratorAccess}
-        style={{
-          marginTop: "1.4rem",
-          padding: "0.7rem 0.9rem",
-          display: "inline-flex",
-          alignItems: "center",
-          gap: "0.5rem",
-          border: "1px solid #cbd5e1",
-          borderRadius: "0.75rem",
-          background: "#ffffff",
-          color: "#334155",
-          font: "inherit",
-          fontWeight: 700,
-          cursor: "pointer",
-        }}
-      >
-        <LogIn size={17} aria-hidden="true" />
-        Administrator access
-      </button>
+      {showAdministratorAccess && (
+        <button
+          type="button"
+          onClick={onAdministratorAccess}
+          style={{
+            marginTop: "1.4rem",
+            padding: "0.7rem 0.9rem",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "0.5rem",
+            border: "1px solid #cbd5e1",
+            borderRadius: "0.75rem",
+            background: "#ffffff",
+            color: "#334155",
+            font: "inherit",
+            fontWeight: 700,
+            cursor: "pointer",
+          }}
+        >
+          <LogIn size={17} aria-hidden="true" />
+          Administrator access
+        </button>
+      )}
     </StatusShell>
   );
 }
@@ -319,6 +323,7 @@ export default function RuntimeMaintenanceGate({
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus>({
     state: "loading",
   });
+  const [hasAdministratorAccess, setHasAdministratorAccess] = useState(false);
   const [locationHash, setLocationHash] = useState(() => window.location.hash);
 
   const loadRuntimeStatus = useCallback(async () => {
@@ -400,6 +405,48 @@ export default function RuntimeMaintenanceGate({
   }, [loadRuntimeStatus]);
 
   useEffect(() => {
+    let cancelled = false;
+    let checkVersion = 0;
+
+    async function checkAdministratorAccess(
+      session: Awaited<ReturnType<typeof supabase.auth.getSession>>["data"]["session"],
+    ) {
+      const currentCheckVersion = ++checkVersion;
+      setHasAdministratorAccess(false);
+
+      if (!session) {
+        return;
+      }
+
+      const { error: adminAccessError } = await supabase
+        .rpc("get_admin_user_activity")
+        .limit(1);
+
+      if (!cancelled && currentCheckVersion === checkVersion) {
+        setHasAdministratorAccess(!adminAccessError);
+      }
+    }
+
+    void supabase.auth.getSession().then(({ data }) => {
+      if (!cancelled) {
+        void checkAdministratorAccess(data.session);
+      }
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      void checkAdministratorAccess(session);
+    });
+
+    return () => {
+      cancelled = true;
+      checkVersion += 1;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
     const handleHashChange = () => setLocationHash(window.location.hash);
     window.addEventListener("hashchange", handleHashChange);
 
@@ -418,6 +465,7 @@ export default function RuntimeMaintenanceGate({
     return (
       <MaintenancePage
         settings={runtimeStatus.settings}
+        showAdministratorAccess={hasAdministratorAccess}
         onAdministratorAccess={() => {
           window.location.hash = ADMIN_MAINTENANCE_HASH;
         }}

@@ -43,95 +43,6 @@ function useAdministrationMenuTarget(): HTMLElement | null {
   return target;
 }
 
-function getBrowserTimeZoneLabel(): string {
-  const timeZone =
-    Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  const date = new Date();
-  const offsetMinutes = -date.getTimezoneOffset();
-  const sign = offsetMinutes >= 0 ? "+" : "-";
-  const absoluteOffsetMinutes = Math.abs(offsetMinutes);
-  const offsetHours = String(Math.floor(absoluteOffsetMinutes / 60)).padStart(
-    2,
-    "0",
-  );
-  const offsetRemainder = String(absoluteOffsetMinutes % 60).padStart(2, "0");
-  const detectedAbbreviation = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    timeZoneName: "short",
-  })
-    .formatToParts(date)
-    .find((part) => part.type === "timeZoneName")?.value;
-  const abbreviation =
-    timeZone === "Asia/Tokyo" ? "JST" : detectedAbbreviation || timeZone;
-
-  return `${timeZone} (${abbreviation}, UTC${sign}${offsetHours}:${offsetRemainder})`;
-}
-
-function useMaintenanceControlEnhancements(hash: string): void {
-  useEffect(() => {
-    if (hash !== ADMIN_MAINTENANCE_HASH) {
-      return;
-    }
-
-    const timeZoneLabel = getBrowserTimeZoneLabel();
-    const helperText = `Browser local time: ${timeZoneLabel}. Enter YYYY-MM-DDTHH:MM, for example 2026-08-03T15:30.`;
-
-    const enhanceControls = () => {
-      const restorationInput = document.querySelector<HTMLInputElement>(
-        'input[type="datetime-local"], input[data-maintenance-restoration-time="true"]',
-      );
-
-      if (!restorationInput) {
-        return;
-      }
-
-      if (
-        restorationInput.dataset.maintenanceRestorationTime !== "true"
-      ) {
-        restorationInput.dataset.maintenanceRestorationTime = "true";
-      }
-
-      if (restorationInput.type !== "text") {
-        restorationInput.type = "text";
-      }
-
-      if (restorationInput.placeholder !== "YYYY-MM-DDTHH:MM") {
-        restorationInput.placeholder = "YYYY-MM-DDTHH:MM";
-      }
-
-      restorationInput.lang = "en";
-      restorationInput.inputMode = "numeric";
-      restorationInput.autocomplete = "off";
-      restorationInput.pattern =
-        "[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}";
-      restorationInput.title =
-        `Expected restoration time in ${timeZoneLabel}. Use YYYY-MM-DDTHH:MM.`;
-      restorationInput.setAttribute(
-        "aria-label",
-        `Expected restoration time in ${timeZoneLabel}. Use YYYY-MM-DDTHH:MM.`,
-      );
-
-      const helper =
-        restorationInput.parentElement?.querySelector<HTMLElement>(".muted");
-
-      if (helper && helper.textContent !== helperText) {
-        helper.textContent = helperText;
-      }
-    };
-
-    enhanceControls();
-
-    const observer = new MutationObserver(enhanceControls);
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-    });
-
-    return () => observer.disconnect();
-  }, [hash]);
-}
-
 export default function AdminMaintenanceEntryPoint({
   children,
 }: {
@@ -140,24 +51,8 @@ export default function AdminMaintenanceEntryPoint({
   const hash = useLocationHash();
   const administrationMenuTarget = useAdministrationMenuTarget();
 
-  useMaintenanceControlEnhancements(hash);
-
   if (hash === ADMIN_MAINTENANCE_HASH) {
-    return (
-      <>
-        <style>{`
-          .app-shell label > input[type="checkbox"] {
-            width: 1.1rem !important;
-            height: 1.1rem;
-            min-width: 1.1rem;
-            flex: 0 0 1.1rem;
-            margin: 0.2rem 0 0;
-            padding: 0;
-          }
-        `}</style>
-        <MaintenanceSettingsPage />
-      </>
-    );
+    return <MaintenanceSettingsPage />;
   }
 
   return (

@@ -1,3 +1,5 @@
+import "./maintenanceRequestGate.ts";
+
 export type SearchQueryDomainSystem = "IPC" | "CPC";
 
 export interface SearchQueryDomainCandidate {

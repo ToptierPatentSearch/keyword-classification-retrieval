@@ -100,6 +100,19 @@ jobs:
           path.write_text(source, encoding="utf-8")
           PY
 
+      - name: Commit backend patch
+        shell: bash
+        run: |
+          if git diff --quiet -- supabase/functions/analyze/index.ts; then
+            echo "Analyze maintenance patch is already present."
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -- supabase/functions/analyze/index.ts
+            git commit -m "Block analyze requests during maintenance [skip ci]"
+            git push origin HEAD:feature/runtime-maintenance-mode
+          fi
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
@@ -120,17 +133,3 @@ jobs:
 
       - name: Type-check analyze Edge Function
         run: deno check supabase/functions/analyze/index.ts
-
-      - name: Commit validated backend patch
-        shell: bash
-        run: |
-          if git diff --quiet -- supabase/functions/analyze/index.ts; then
-            echo "Analyze maintenance patch is already present."
-            exit 0
-          fi
-
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -- supabase/functions/analyze/index.ts
-          git commit -m "Block analyze requests during maintenance [skip ci]"
-          git push origin HEAD:feature/runtime-maintenance-mode

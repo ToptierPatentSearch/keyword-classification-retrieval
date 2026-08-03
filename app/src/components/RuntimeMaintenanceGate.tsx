@@ -1,6 +1,7 @@
 import { type ReactNode, useCallback, useEffect, useState } from "react";
-import { Clock3, RefreshCw, Search, Wrench } from "lucide-react";
+import { Clock3, LogIn, RefreshCw, Search, Wrench } from "lucide-react";
 import { supabase } from "../supabaseClient";
+import { ADMIN_MAINTENANCE_HASH } from "./AdminMaintenanceEntryPoint";
 
 type RuntimeSettings = {
   maintenance_enabled: boolean;
@@ -124,7 +125,13 @@ function LoadingPage() {
   );
 }
 
-function MaintenancePage({ settings }: { settings: RuntimeSettings }) {
+function MaintenancePage({
+  settings,
+  onAdministratorAccess,
+}: {
+  settings: RuntimeSettings;
+  onAdministratorAccess: () => void;
+}) {
   const expectedBackAt = formatExpectedBackAt(settings.expected_back_at);
 
   return (
@@ -215,6 +222,27 @@ function MaintenancePage({ settings }: { settings: RuntimeSettings }) {
         Analysis requests are blocked at the server while maintenance mode is
         active, so no analysis credit will be consumed.
       </p>
+      <button
+        type="button"
+        onClick={onAdministratorAccess}
+        style={{
+          marginTop: "1.4rem",
+          padding: "0.7rem 0.9rem",
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "0.5rem",
+          border: "1px solid #cbd5e1",
+          borderRadius: "0.75rem",
+          background: "#ffffff",
+          color: "#334155",
+          font: "inherit",
+          fontWeight: 700,
+          cursor: "pointer",
+        }}
+      >
+        <LogIn size={17} aria-hidden="true" />
+        Administrator access
+      </button>
     </StatusShell>
   );
 }
@@ -291,6 +319,7 @@ export default function RuntimeMaintenanceGate({
   const [runtimeStatus, setRuntimeStatus] = useState<RuntimeStatus>({
     state: "loading",
   });
+  const [locationHash, setLocationHash] = useState(() => window.location.hash);
 
   const loadRuntimeStatus = useCallback(async () => {
     const { data, error } = await supabase
@@ -350,21 +379,50 @@ export default function RuntimeMaintenanceGate({
         void loadRuntimeStatus();
       }
     };
+    const handleRuntimeSettingsChanged = () => {
+      void loadRuntimeStatus();
+    };
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener(
+      "runtime-settings-changed",
+      handleRuntimeSettingsChanged,
+    );
 
     return () => {
       window.clearInterval(intervalId);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener(
+        "runtime-settings-changed",
+        handleRuntimeSettingsChanged,
+      );
     };
   }, [loadRuntimeStatus]);
+
+  useEffect(() => {
+    const handleHashChange = () => setLocationHash(window.location.hash);
+    window.addEventListener("hashchange", handleHashChange);
+
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
+
+  if (locationHash === ADMIN_MAINTENANCE_HASH) {
+    return <>{children}</>;
+  }
 
   if (runtimeStatus.state === "loading") {
     return <LoadingPage />;
   }
 
   if (runtimeStatus.state === "maintenance") {
-    return <MaintenancePage settings={runtimeStatus.settings} />;
+    return (
+      <MaintenancePage
+        settings={runtimeStatus.settings}
+        onAdministratorAccess={() => {
+          window.location.hash = ADMIN_MAINTENANCE_HASH;
+        }}
+      />
+    );
   }
 
   if (runtimeStatus.state === "unavailable") {

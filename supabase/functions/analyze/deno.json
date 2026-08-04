@@ -1,0 +1,5 @@
+{
+  "imports": {
+    "npm:openai@^5.0.0": "./openaiLanguageAware.ts"
+  }
+}

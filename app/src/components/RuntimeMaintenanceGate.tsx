@@ -2,6 +2,7 @@ import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { Clock3, LogIn, RefreshCw, Search, Wrench } from "lucide-react";
 import { supabase } from "../supabaseClient";
 import { ADMIN_MAINTENANCE_HASH } from "./AdminMaintenanceEntryPoint";
+import { formatLocalAndUtcTimestamp } from "../lib/time";
 
 type RuntimeSettings = {
   maintenance_enabled: boolean;
@@ -31,20 +32,8 @@ function formatExpectedBackAt(value: string | null): string | null {
     return null;
   }
 
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return null;
-  }
-
-  return new Intl.DateTimeFormat("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZoneName: "short",
-  }).format(date);
+  const formatted = formatLocalAndUtcTimestamp(value, { invalidValue: "" });
+  return formatted || null;
 }
 
 function StatusShell({ children }: { children: ReactNode }) {

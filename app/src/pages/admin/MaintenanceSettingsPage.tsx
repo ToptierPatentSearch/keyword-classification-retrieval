@@ -19,6 +19,10 @@ import {
   Wrench,
 } from "lucide-react";
 import { supabase } from "../../supabaseClient";
+import {
+  formatLocalAndUtcTimestamp,
+  getLocalTimeZoneDescription,
+} from "../../lib/time";
 
 type RuntimeSettings = {
   maintenance_enabled: boolean;
@@ -52,27 +56,6 @@ function asErrorMessage(error: unknown): string {
 
 function pad(value: number): string {
   return String(value).padStart(2, "0");
-}
-
-function getBrowserTimeZoneLabel(date = new Date()): string {
-  const timeZone =
-    Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  const offsetMinutes = -date.getTimezoneOffset();
-  const sign = offsetMinutes >= 0 ? "+" : "-";
-  const absoluteOffset = Math.abs(offsetMinutes);
-  const offset = `${sign}${pad(Math.floor(absoluteOffset / 60))}:${pad(
-    absoluteOffset % 60,
-  )}`;
-  const detectedAbbreviation = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    timeZoneName: "short",
-  })
-    .formatToParts(date)
-    .find((part) => part.type === "timeZoneName")?.value;
-  const abbreviation =
-    timeZone === "Asia/Tokyo" ? "JST" : detectedAbbreviation || timeZone;
-
-  return `${timeZone} (${abbreviation}, UTC${offset})`;
 }
 
 function toLocalDateTimeText(value: string | null): string {
@@ -122,24 +105,7 @@ function parseLocalDateTimeText(value: string): Date | null {
 }
 
 function formatTimestamp(value: string | null): string {
-  if (!value) {
-    return "Not recorded";
-  }
-
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return "Not recorded";
-  }
-
-  return new Intl.DateTimeFormat("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZoneName: "short",
-  }).format(date);
+  return formatLocalAndUtcTimestamp(value, { invalidValue: "Not recorded" });
 }
 
 function settingsToDraft(settings: RuntimeSettings): MaintenanceDraft {
@@ -193,7 +159,7 @@ export default function MaintenanceSettingsPage() {
     settingsToDraft(DEFAULT_SETTINGS),
   );
 
-  const browserTimeZoneLabel = useMemo(() => getBrowserTimeZoneLabel(), []);
+  const browserTimeZoneLabel = useMemo(() => getLocalTimeZoneDescription(), []);
   const previewRestorationDate = useMemo(
     () => parseLocalDateTimeText(draft.expectedBackAtLocal),
     [draft.expectedBackAtLocal],
@@ -734,8 +700,8 @@ export default function MaintenanceSettingsPage() {
                   className="muted"
                   style={{ fontSize: "0.78rem" }}
                 >
-                  Browser local time: {browserTimeZoneLabel}. Use YYYY-MM-DD
-                  HH:MM, for example 2026-08-03 15:30.
+                  User local time: {browserTimeZoneLabel}. Saved timestamps use
+                  UTC. Use YYYY-MM-DD HH:MM, for example 2026-08-03 15:30.
                 </span>
               </label>
             </div>

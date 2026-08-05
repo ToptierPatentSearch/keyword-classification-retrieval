@@ -5,6 +5,10 @@ import {
   buildSearchQueryStarter,
   SEARCH_QUERY_REVIEW_NOTICE,
 } from "./searchQuery";
+import {
+  formatClassificationCodeForDisplay,
+  removeWhitespaceAfterDoubleQuotes,
+} from "./lib/displayFormatting";
 
 const PDF_FONT_FILE = "ipaexg.ttf";
 const PDF_FONT_FAMILY = "IPAexGothic";
@@ -55,26 +59,12 @@ function registerPdfFont(doc: jsPDF, fontBase64: string): void {
 const joinValues = (values: string[] | undefined) =>
   Array.isArray(values) && values.length > 0 ? values.join(", ") : "—";
 
-function formatCpcCodeForDisplay(code: string): string {
-  const trimmed = code.trim();
-  const compact = trimmed.replace(/\s+/g, "");
-  const match = compact.match(/^([A-HY]\d{2}[A-Z])(\d+\/[0-9A-Z]+)$/i);
-
-  return match ? `${match[1].toUpperCase()} ${match[2]}` : trimmed;
-}
-
 const joinCpcValues = (values: string[] | undefined) =>
   Array.isArray(values) && values.length > 0
-    ? values.map(formatCpcCodeForDisplay).join(", ")
+    ? values
+        .map((value) => formatClassificationCodeForDisplay(value, "CPC"))
+        .join(", ")
     : "—";
-
-function normalizeDoubleQuoteWhitespace(value: string): string {
-  return value
-    .replace(/”\s+/g, "” ")
-    .replace(/"\s+/g, '" ')
-    .replace(/“\s+/g, "“")
-    .replace(/(^|[\s(\[{])"\s+/g, '$1"');
-}
 
 type AutoTableDocument = jsPDF & {
   lastAutoTable?: { finalY: number };
@@ -187,7 +177,7 @@ export async function downloadAnalysisPdf(
         ["Occurrences", String(keyword.count)],
         ["Rank", String(keyword.rank)],
         ["Confidence", keyword.classification_confidence],
-        ["Reason", normalizeDoubleQuoteWhitespace(keyword.reason)],
+        ["Reason", removeWhitespaceAfterDoubleQuotes(keyword.reason)],
       ],
       styles: {
         font: PDF_FONT_FAMILY,

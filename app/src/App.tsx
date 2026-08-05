@@ -19,6 +19,10 @@ import SearchQueryStarter from "./components/SearchQueryStarter";
 import { buildSearchQueryStarter } from "./searchQuery";
 import { formatLocalAndUtcTimestamp } from "./lib/time";
 import {
+  formatClassificationCodeForDisplay,
+  removeWhitespaceAfterDoubleQuotes,
+} from "./lib/displayFormatting";
+import {
   ArrowRight,
   ChevronDown,
   Clock3,
@@ -178,7 +182,7 @@ function RouteCodeCard({
             {label}
           </span>
         )}
-        <strong>{item.code}</strong>
+        <strong>{formatClassificationCodeForDisplay(item.code, item.system)}</strong>
         {score !== null && (
           <span
             style={{ color: "#166534", fontSize: "0.7rem", fontWeight: 800 }}
@@ -504,7 +508,7 @@ function KeywordResultCard({ keyword }: { keyword: KeywordClassification }) {
           </div>
         </div>
         <div style={{ fontSize: "0.82rem", lineHeight: 1.45 }}>
-          <strong>Selection rationale:</strong> {keyword.reason}
+          <strong>Selection rationale:</strong>{" "}{removeWhitespaceAfterDoubleQuotes(keyword.reason)}
         </div>
       </section>
 
@@ -533,7 +537,7 @@ function KeywordResultCard({ keyword }: { keyword: KeywordClassification }) {
         </div>
         <div>
           <strong>Classification rationale:</strong>{" "}
-          {keyword.classification_reason}
+          {removeWhitespaceAfterDoubleQuotes(keyword.classification_reason)}
         </div>
       </section>
     </article>

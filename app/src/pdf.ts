@@ -55,6 +55,27 @@ function registerPdfFont(doc: jsPDF, fontBase64: string): void {
 const joinValues = (values: string[] | undefined) =>
   Array.isArray(values) && values.length > 0 ? values.join(", ") : "—";
 
+function formatCpcCodeForDisplay(code: string): string {
+  const trimmed = code.trim();
+  const compact = trimmed.replace(/\s+/g, "");
+  const match = compact.match(/^([A-HY]\d{2}[A-Z])(\d+\/[0-9A-Z]+)$/i);
+
+  return match ? `${match[1].toUpperCase()} ${match[2]}` : trimmed;
+}
+
+const joinCpcValues = (values: string[] | undefined) =>
+  Array.isArray(values) && values.length > 0
+    ? values.map(formatCpcCodeForDisplay).join(", ")
+    : "—";
+
+function normalizeDoubleQuoteWhitespace(value: string): string {
+  return value
+    .replace(/”\s+/g, "” ")
+    .replace(/"\s+/g, '" ')
+    .replace(/“\s+/g, "“")
+    .replace(/(^|[\s(\[{])"\s+/g, '$1"');
+}
+
 type AutoTableDocument = jsPDF & {
   lastAutoTable?: { finalY: number };
 };
@@ -160,13 +181,13 @@ export async function downloadAnalysisPdf(
         ["Normalized term", keyword.normalized_term],
         ["Synonyms", joinValues(keyword.synonyms)],
         ["IPC", joinValues(keyword.ipc)],
-        ["CPC", joinValues(keyword.cpc)],
+        ["CPC", joinCpcValues(keyword.cpc)],
         ["FI", joinValues(keyword.fi)],
         ["F-term", joinValues(keyword.f_term)],
         ["Occurrences", String(keyword.count)],
         ["Rank", String(keyword.rank)],
         ["Confidence", keyword.classification_confidence],
-        ["Reason", keyword.reason],
+        ["Reason", normalizeDoubleQuoteWhitespace(keyword.reason)],
       ],
       styles: {
         font: PDF_FONT_FAMILY,

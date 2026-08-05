@@ -68,8 +68,10 @@ const joinCpcValues = (values: string[] | undefined) =>
     ? values.map(formatCpcCodeForDisplay).join(", ")
     : "—";
 
-function removeSpaceAfterOpeningDoubleQuote(value: string): string {
+function normalizeDoubleQuoteWhitespace(value: string): string {
   return value
+    .replace(/”\s+/g, "” ")
+    .replace(/"\s+/g, '" ')
     .replace(/“\s+/g, "“")
     .replace(/(^|[\s(\[{])"\s+/g, '$1"');
 }
@@ -185,7 +187,7 @@ export async function downloadAnalysisPdf(
         ["Occurrences", String(keyword.count)],
         ["Rank", String(keyword.rank)],
         ["Confidence", keyword.classification_confidence],
-        ["Reason", removeSpaceAfterOpeningDoubleQuote(keyword.reason)],
+        ["Reason", normalizeDoubleQuoteWhitespace(keyword.reason)],
       ],
       styles: {
         font: PDF_FONT_FAMILY,

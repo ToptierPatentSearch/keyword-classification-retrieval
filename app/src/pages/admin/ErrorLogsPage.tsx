@@ -16,6 +16,7 @@ import {
   useState,
 } from "react";
 import { supabase } from "../../supabaseClient";
+import { formatLocalAndUtcTimestamp } from "../../lib/time";
 
 type ErrorSeverity = "warning" | "error" | "critical";
 type ErrorStatus = "open" | "resolved" | "ignored";
@@ -52,14 +53,10 @@ const MAX_LOGS = 500;
 
 function formatDateTime(value: string | null): string {
   if (!value) return "—";
-
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-
-  return new Intl.DateTimeFormat("en-US", {
-    dateStyle: "medium",
-    timeStyle: "medium",
-  }).format(date);
+  return formatLocalAndUtcTimestamp(value, {
+    seconds: true,
+    invalidValue: value,
+  });
 }
 
 function normalizeSearchValue(value: string): string {

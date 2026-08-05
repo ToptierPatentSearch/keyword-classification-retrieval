@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, LogOut, RefreshCcw, ShieldCheck } from "lucide-react";
 import { supabase } from "../../supabaseClient";
+import { formatLocalAndUtcTimestamp } from "../../lib/time";
 
 type UserConsentRow = {
   consent_id: string;
@@ -29,24 +30,10 @@ function formatTimestamp(value: string | null): string {
     return "—";
   }
 
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-
-  return new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-    timeZoneName: "short",
-  }).format(date);
+  return formatLocalAndUtcTimestamp(value, {
+    seconds: true,
+    invalidValue: value,
+  });
 }
 
 export default function UserConsentsPage({

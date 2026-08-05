@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Coins, LogOut, RefreshCcw } from "lucide-react";
 import { supabase } from "../../supabaseClient";
+import { formatLocalAndUtcTimestamp } from "../../lib/time";
 
 type UserPackagePurchaseRow = {
   user_id: string;
@@ -26,23 +27,7 @@ function asErrorMessage(error: unknown): string {
 }
 
 function formatTimestamp(value: string): string {
-  const date = new Date(value);
-
-  if (Number.isNaN(date.getTime())) {
-    return value;
-  }
-
-  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-
-  return new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZoneName: "short",
-  }).format(date);
+  return formatLocalAndUtcTimestamp(value, { invalidValue: value });
 }
 
 function normalizeCount(value: unknown): number {

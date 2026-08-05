@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Activity, ArrowLeft, LogOut, RefreshCcw } from "lucide-react";
 import { supabase } from "../../supabaseClient";
+import { formatLocalAndUtcTimestamp } from "../../lib/time";
 
 type ActivityRow = Record<string, unknown>;
 
@@ -56,18 +57,7 @@ function formatValue(value: unknown): string {
       !Number.isNaN(new Date(value).getTime());
 
     if (looksLikeTimestamp) {
-      const timeZone =
-        Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-
-      return new Intl.DateTimeFormat("en-US", {
-        timeZone,
-        year: "numeric",
-        month: "short",
-        day: "2-digit",
-        hour: "numeric",
-        minute: "2-digit",
-        timeZoneName: "short",
-      }).format(new Date(value));
+      return formatLocalAndUtcTimestamp(value, { invalidValue: value });
     }
 
     return value;

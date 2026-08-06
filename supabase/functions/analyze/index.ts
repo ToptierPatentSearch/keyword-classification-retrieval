@@ -8,6 +8,7 @@ import {
   filterClassificationCodesByDomain,
   type SearchQueryDomainCandidate,
 } from "./searchQueryDomain.ts";
+import { applyReviewedClassificationDomainGate } from "./reviewedClassificationDomain.ts";
 
 type Confidence = "high" | "medium" | "low";
 type PatentLanguage = "en" | "ja";
@@ -3680,10 +3681,14 @@ Deno.serve(async (request: Request) => {
       await assertCatalogBackedClassificationCodes(adminClient, result);
 
       auditStage = "search_query_review";
-      result = {
-        ...result,
-        search_query_starter: await reviewSearchQueriesWithAi(result, apiKey),
-      };
+      const searchQueryStarter = await reviewSearchQueriesWithAi(result, apiKey);
+      result = applyReviewedClassificationDomainGate(
+        {
+          ...result,
+          search_query_starter: searchQueryStarter,
+        },
+        searchQueryStarter.classificationQuery,
+      );
     } catch (classificationError) {
       console.error(
         "Classification or search-query review failed:",

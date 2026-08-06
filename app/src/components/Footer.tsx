@@ -1,7 +1,7 @@
 import { useState } from "react";
 
 import inputLimitationText from "./input-limitation.txt?raw";
-import operationGuideText from "./operation-guide.txt?raw";
+import OperationGuide from "./OperationGuide";
 import privacyPolicyText from "./privacy-policy.txt?raw";
 import termsOfUseText from "./terms-of-use.txt?raw";
 
@@ -11,8 +11,10 @@ type FooterPageKey =
   | "terms-of-use"
   | "privacy-policy";
 
+type TextFooterPageKey = Exclude<FooterPageKey, "operation-guide">;
+
 const footerPages: Record<
-  FooterPageKey,
+  TextFooterPageKey,
   {
     title: string;
     body: string;
@@ -21,10 +23,6 @@ const footerPages: Record<
   "input-limitation": {
     title: "Input Limitations",
     body: inputLimitationText,
-  },
-  "operation-guide": {
-    title: "Operation Guide",
-    body: operationGuideText,
   },
   "terms-of-use": {
     title: "Terms of Use",
@@ -38,24 +36,47 @@ const footerPages: Record<
 
 export default function Footer() {
   const [activePage, setActivePage] = useState<FooterPageKey | null>(null);
+  const activeTextPage =
+    activePage && activePage !== "operation-guide"
+      ? footerPages[activePage]
+      : null;
 
   return (
     <>
       {activePage && (
-        <section className="footer-page-panel">
+        <section
+          className={`footer-page-panel ${
+            activePage === "operation-guide"
+              ? "footer-page-panel--operation-guide"
+              : ""
+          }`}
+          aria-labelledby={
+            activePage === "operation-guide"
+              ? "operation-guide-title"
+              : "footer-page-title"
+          }
+        >
           <button
             type="button"
             className="footer-page-close"
             onClick={() => setActivePage(null)}
+            aria-label={`Close ${
+              activePage === "operation-guide"
+                ? "Operation Guide"
+                : activeTextPage?.title ?? "footer information"
+            }`}
           >
             Close
           </button>
 
-          <h2>{footerPages[activePage].title}</h2>
-
-          <pre className="footer-page-text">
-            {footerPages[activePage].body}
-          </pre>
+          {activePage === "operation-guide" ? (
+            <OperationGuide />
+          ) : activeTextPage ? (
+            <>
+              <h2 id="footer-page-title">{activeTextPage.title}</h2>
+              <pre className="footer-page-text">{activeTextPage.body}</pre>
+            </>
+          ) : null}
         </section>
       )}
 
@@ -64,6 +85,7 @@ export default function Footer() {
           <button
             type="button"
             onClick={() => setActivePage("input-limitation")}
+            aria-expanded={activePage === "input-limitation"}
           >
             Input Limitations
           </button>
@@ -73,13 +95,18 @@ export default function Footer() {
           <button
             type="button"
             onClick={() => setActivePage("operation-guide")}
+            aria-expanded={activePage === "operation-guide"}
           >
             Operation Guide
           </button>
 
           <span>|</span>
 
-          <button type="button" onClick={() => setActivePage("terms-of-use")}>
+          <button
+            type="button"
+            onClick={() => setActivePage("terms-of-use")}
+            aria-expanded={activePage === "terms-of-use"}
+          >
             Terms of Use
           </button>
 
@@ -88,6 +115,7 @@ export default function Footer() {
           <button
             type="button"
             onClick={() => setActivePage("privacy-policy")}
+            aria-expanded={activePage === "privacy-policy"}
           >
             Privacy Policy
           </button>

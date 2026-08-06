@@ -137,3 +137,36 @@ test("retains multiple reviewed main groups for a cross-domain invention", () =>
     ["B60L 53/126", "H02J 50/10"],
   );
 });
+
+
+test("withholds all classifications when no CPC domain is approved", () => {
+  const result = {
+    keywords: [
+      keyword({
+        ipc: ["A61B 1/267"],
+        cpc: ["B60G 2401/142"],
+        ipc_evidence: [{ code: "A61B 1/267" }],
+        cpc_evidence: [{ code: "B60G 2401/142" }],
+        classification_route: {
+          ipc_cpc_area: [
+            { system: "IPC", code: "A61B 1/267" },
+            { system: "CPC", code: "B60G 2401/142" },
+          ],
+          fi_subdivisions: [],
+        },
+        classification_confidence: "medium",
+      }),
+    ],
+  };
+
+  applyReviewedClassificationDomainGate(result, "");
+
+  assert.deepEqual(result.keywords[0].ipc, []);
+  assert.deepEqual(result.keywords[0].cpc, []);
+  assert.deepEqual(
+    result.keywords[0].classification_route.ipc_cpc_area,
+    [],
+  );
+  assert.equal(result.keywords[0].classification_confidence, "low");
+  assert.match(result.keywords[0].classification_reason, /were withheld/);
+});

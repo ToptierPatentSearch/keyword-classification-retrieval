@@ -95,15 +95,13 @@ function evidenceCount(keyword: ReviewedDomainKeywordLike): number {
  * Makes every displayed IPC/CPC/FI/F-term route agree with the CPC domains
  * selected by the structured AI query review. The reviewed query can retain
  * multiple main groups for a genuinely cross-domain invention. When no CPC
- * domain was selected, the existing catalog-backed classifications are left
- * unchanged rather than being erased.
+ * domain was selected, all displayed classifications are withheld rather
+ * than exposing classifications that the final review did not approve.
  */
 export function applyReviewedClassificationDomainGate<
   T extends ReviewedDomainResultLike,
 >(result: T, classificationQuery: string): T {
   const allowedMainGroups = new Set(reviewedCpcMainGroups(classificationQuery));
-
-  if (allowedMainGroups.size === 0) return result;
 
   for (const keyword of result.keywords) {
     const beforeCount = evidenceCount(keyword);

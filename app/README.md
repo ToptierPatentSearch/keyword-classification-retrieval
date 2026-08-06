@@ -66,21 +66,23 @@ Set the OpenAI key as an Edge Function secret:
 supabase secrets set OPENAI_API_KEY=sk-your-key
 ```
 
-Optionally choose a model without changing code:
-
-```bash
-supabase secrets set OPENAI_MODEL=gpt-4.1-mini
-```
+The analyze function is pinned to the `gpt-5.6` alias by `supabase/functions/analyze/entrypoint.ts`. The alias routes requests to GPT-5.6 Sol. An older `OPENAI_MODEL` project secret is overwritten by the entrypoint before the analysis module loads.
 
 ## 4. Deploy the Edge Function
 
-The function lives at:
+The configured entrypoint is:
+
+```text
+../supabase/functions/analyze/entrypoint.ts
+```
+
+It loads the existing analysis implementation from:
 
 ```text
 ../supabase/functions/analyze/index.ts
 ```
 
-Deploy it from the repository root:
+Use Supabase CLI 1.215.0 or later because this project uses a custom function entrypoint. Deploy from the repository root:
 
 ```bash
 supabase functions deploy analyze
@@ -139,6 +141,7 @@ Then publish `app/dist` to GitHub Pages. Common options include:
 ## Security notes
 
 - `OPENAI_API_KEY` is read only by `supabase/functions/analyze/index.ts` from Supabase secrets.
+- `supabase/functions/analyze/entrypoint.ts` pins the analysis model to `gpt-5.6` before loading the analysis implementation.
 - The frontend uses only `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY`.
 - No `server.js` or Express server is required.
 - Do not commit `.env.local` or any file containing API keys.

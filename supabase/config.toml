@@ -1,2 +1,5 @@
+[functions.analyze]
+entrypoint = "./functions/analyze/entrypoint.ts"
+
 [functions.stripe-webhook]
 verify_jwt = false

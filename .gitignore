@@ -7,3 +7,4 @@ dist/
 .DS_Store
 
 supabase/.temp/
+app/classification-data/

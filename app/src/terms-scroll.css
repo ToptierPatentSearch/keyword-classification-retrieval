@@ -14,7 +14,45 @@
 }
 
 .terms-text p:first-child {
-  margin-top: 0;
+  margin: 0;
+  padding: 14px 16px 8px;
+  border: 1px solid #bfdbfe;
+  border-bottom: 0;
+  border-radius: 12px 12px 0 0;
+  background: #eff6ff;
+  color: #0f172a;
+  font-size: 1rem;
+  font-weight: 800;
+}
+
+.terms-text p:nth-child(n + 2):nth-child(-n + 5) {
+  margin: 0;
+  padding: 4px 16px;
+  border-right: 1px solid #bfdbfe;
+  border-left: 1px solid #bfdbfe;
+  background: #eff6ff;
+  color: #334155;
+  line-height: 1.55;
+}
+
+.terms-text p:nth-child(6) {
+  margin: 0 0 18px;
+  padding: 4px 16px 14px;
+  border: 1px solid #bfdbfe;
+  border-top: 0;
+  border-radius: 0 0 12px 12px;
+  background: #eff6ff;
+  color: #334155;
+  line-height: 1.55;
+}
+
+.terms-text p:nth-child(7) {
+  margin: 0 0 12px;
+  padding-top: 16px;
+  border-top: 1px solid #cbd5e1;
+  color: #0f172a;
+  font-size: 1rem;
+  font-weight: 800;
 }
 
 .terms-text p:last-child {
@@ -49,5 +87,15 @@
   .terms-text {
     max-height: 50vh;
     padding: 16px;
+  }
+
+  .terms-text p:first-child {
+    padding: 12px 14px 7px;
+  }
+
+  .terms-text p:nth-child(n + 2):nth-child(-n + 5),
+  .terms-text p:nth-child(6) {
+    padding-right: 14px;
+    padding-left: 14px;
   }
 }

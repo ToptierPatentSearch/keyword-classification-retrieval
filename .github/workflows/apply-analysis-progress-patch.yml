@@ -1,0 +1,46 @@
+name: Apply analysis progress patch
+
+on:
+  push:
+    branches:
+      - codex/backend-analysis-progress
+    paths:
+      - scripts/apply_analysis_progress_patch.py
+
+permissions:
+  contents: write
+
+jobs:
+  apply-patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
+
+      - name: Apply focused source patch
+        run: python scripts/apply_analysis_progress_patch.py
+
+      - name: Verify frontend build
+        working-directory: app
+        run: |
+          npm ci
+          npm run build
+
+      - name: Commit verified changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -- \
+            app/src/App.tsx \
+            app/src/analysis-slideshow.css \
+            app/src/analysisProgress.ts \
+            app/src/components/AnalysisProgress.tsx \
+            supabase/functions/analyze/index.ts \
+            supabase/migrations/20260809090000_create_analysis_progress.sql
+          git rm -- .github/workflows/apply-analysis-progress-patch.yml scripts/apply_analysis_progress_patch.py
+          git commit -m "Add backend analysis progress stages"
+          git push origin HEAD:${{ github.ref_name }}

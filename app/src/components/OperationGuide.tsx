@@ -403,9 +403,7 @@ export default function OperationGuide() {
         <ol>
           {guideSteps.map((step) => (
             <li key={step.id}>
-              <a href={`#guide-${step.id}`}>
-                {step.number}. {step.title}
-              </a>
+              <a href={`#guide-${step.id}`}>{step.title}</a>
             </li>
           ))}
         </ol>

@@ -198,7 +198,63 @@ const corsHeaders = {
   "Access-Control-Max-Age": "86400",
 };
 
+type AnalysisProgressStage =
+  | "input_review"
+  | "concept_extraction"
+  | "keyword_expansion"
+  | "classification"
+  | "query_generation"
+  | "final_formatting";
+type AnalysisProgressStatus = "running" | "completed" | "failed";
+
+const ANALYSIS_PROGRESS_STAGE_INDEX: Record<AnalysisProgressStage, number> = {
+  input_review: 0,
+  concept_extraction: 1,
+  keyword_expansion: 2,
+  classification: 3,
+  query_generation: 4,
+  final_formatting: 5,
+};
+let analysisProgressUnavailable = false;
+
+async function writeAnalysisProgress(
+  adminClient: SupabaseClient,
+  userId: string,
+  requestId: string,
+  stage: AnalysisProgressStage,
+  status: AnalysisProgressStatus = "running",
+  errorMessage: string | null = null,
+): Promise<void> {
+  if (analysisProgressUnavailable) {
+    return;
+  }
+
+  const now = new Date();
+  const { error } = await adminClient.from("analysis_progress").upsert(
+    {
+      user_id: userId,
+      request_id: requestId,
+      stage,
+      stage_index: ANALYSIS_PROGRESS_STAGE_INDEX[stage],
+      status,
+      error_message: errorMessage,
+      updated_at: now.toISOString(),
+      expires_at: new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString(),
+    },
+    { onConflict: "user_id,request_id,stage" },
+  );
+
+  if (error) {
+    analysisProgressUnavailable = true;
+    console.warn(
+      "Analysis progress could not be recorded; analysis will continue normally:",
+      error.message,
+    );
+  }
+}
+
 const MIN_INPUT_CHARS = 20;
+
 const MAX_INPUT_CHARS = 10000;
 const MAX_INPUT_LINES = 300;
 const MAX_REPEATED_CHAR_RUN = 20;
@@ -3417,6 +3473,8 @@ Deno.serve(async (request: Request) => {
   let auditInputHash: string | undefined;
   let auditInputCharacters: number | undefined;
   let auditSelectedKeywordCount: number | undefined;
+  let auditAdminClient: SupabaseClient | undefined;
+  let auditProgressStage: AnalysisProgressStage = "input_review";
 
   try {
     const apiKey = getRequiredEnv("OPENAI_API_KEY");
@@ -3480,6 +3538,7 @@ Deno.serve(async (request: Request) => {
         autoRefreshToken: false,
       },
     });
+    auditAdminClient = adminClient;
 
     auditStage = "request_validation";
     const body = (await request.json()) as AnalyzeRequest;
@@ -3513,6 +3572,14 @@ Deno.serve(async (request: Request) => {
       input_characters: auditInputCharacters,
       selected_keyword_count: auditSelectedKeywordCount,
     });
+
+    auditProgressStage = "input_review";
+    await writeAnalysisProgress(
+      adminClient,
+      user.id,
+      requestId,
+      auditProgressStage,
+    );
 
     auditStage = "idempotency_check";
     const {
@@ -3671,16 +3738,44 @@ Deno.serve(async (request: Request) => {
     });
 
     auditStage = "openai_analysis";
+    auditProgressStage = "concept_extraction";
+    await writeAnalysisProgress(
+      adminClient,
+      user.id,
+      requestId,
+      auditProgressStage,
+    );
     const aiResult = await analyzePatentText(text, apiKey, selectedKeywords);
+    auditProgressStage = "keyword_expansion";
+    await writeAnalysisProgress(
+      adminClient,
+      user.id,
+      requestId,
+      auditProgressStage,
+    );
     let result: AnalysisResult;
 
     try {
       auditStage = "classification_lookup";
+      auditProgressStage = "classification";
+      await writeAnalysisProgress(
+        adminClient,
+        user.id,
+        requestId,
+        auditProgressStage,
+      );
       result = await lookupAndRankClassifications(adminClient, aiResult);
       auditStage = "classification_integrity_check";
       await assertCatalogBackedClassificationCodes(adminClient, result);
 
       auditStage = "search_query_review";
+      auditProgressStage = "query_generation";
+      await writeAnalysisProgress(
+        adminClient,
+        user.id,
+        requestId,
+        auditProgressStage,
+      );
       const searchQueryStarter = await reviewSearchQueriesWithAi(result, apiKey);
       result = applyReviewedClassificationDomainGate(
         {
@@ -3702,6 +3797,13 @@ Deno.serve(async (request: Request) => {
     }
 
     auditStage = "pre_charge_validation";
+    auditProgressStage = "final_formatting";
+    await writeAnalysisProgress(
+      adminClient,
+      user.id,
+      requestId,
+      auditProgressStage,
+    );
     validateAnalysisReadyForCharge(result, text);
 
     const preparedResponse = {
@@ -3831,6 +3933,14 @@ Deno.serve(async (request: Request) => {
       duration_ms: Date.now() - analysisStartedAt,
     });
 
+    await writeAnalysisProgress(
+      adminClient,
+      user.id,
+      requestId,
+      "final_formatting",
+      "completed",
+    );
+
     return jsonResponse({
       ...preparedResponse,
       remainingCredits: Number.isFinite(remainingCredits)
@@ -3862,6 +3972,17 @@ Deno.serve(async (request: Request) => {
       error_message: message,
       duration_ms: Date.now() - analysisStartedAt,
     });
+
+    if (auditAdminClient && auditUserId && auditRequestId) {
+      await writeAnalysisProgress(
+        auditAdminClient,
+        auditUserId,
+        auditRequestId,
+        auditProgressStage,
+        "failed",
+        message,
+      );
+    }
 
     return jsonResponse({ error: message }, { status });
   }

@@ -138,7 +138,6 @@ test("retains multiple reviewed main groups for a cross-domain invention", () =>
   );
 });
 
-
 test("withholds all classifications when no CPC domain is approved", () => {
   const result = {
     keywords: [
@@ -169,4 +168,19 @@ test("withholds all classifications when no CPC domain is approved", () => {
   );
   assert.equal(result.keywords[0].classification_confidence, "low");
   assert.match(result.keywords[0].classification_reason, /were withheld/);
+});
+
+test("describes query review as deterministic server validation", () => {
+  const result = {
+    keywords: [],
+    search_query_starter: {
+      reviewStatus: "accepted",
+      reviewSummary: "AI reviewed the generated queries.",
+    },
+  };
+
+  applyReviewedClassificationDomainGate(result, "");
+
+  assert.match(result.search_query_starter.reviewSummary, /Server validation/);
+  assert.match(result.search_query_starter.reviewSummary, /No separate AI/);
 });

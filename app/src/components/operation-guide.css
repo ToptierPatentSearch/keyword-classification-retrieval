@@ -445,46 +445,206 @@
 .guide-analyze-layout {
   display: grid;
   align-content: center;
-  gap: 18px;
-  max-width: 720px;
+  gap: 14px;
+  max-width: 840px;
   margin: 0 auto;
 }
 
-.guide-action-row {
-  justify-content: flex-end;
+.guide-analysis-progress-panel,
+.guide-patent-insight-panel {
+  border: 1px solid rgba(37, 99, 235, 0.22);
+  border-radius: 15px;
+  background: linear-gradient(135deg, #eff6ff, #ffffff);
 }
 
-.guide-analyze-button {
-  min-width: 118px;
-  gap: 8px;
+.guide-analysis-progress-panel {
+  display: grid;
+  gap: 13px;
+  padding: 17px 18px;
 }
 
-.guide-spinner {
-  width: 13px;
-  height: 13px;
-  border: 2px solid rgba(255, 255, 255, 0.45);
-  border-top-color: #ffffff;
+.guide-analysis-progress-heading {
+  display: grid;
+  gap: 4px;
+}
+
+.guide-analysis-progress-heading > span,
+.guide-insight-copy > span {
+  color: #475569;
+  font-size: 0.64rem;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+}
+
+.guide-analysis-progress-heading strong {
+  color: #0f172a;
+  font-size: 0.92rem;
+}
+
+.guide-analysis-progress-heading b {
+  color: #1d4ed8;
+}
+
+.guide-analysis-progress-steps {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 7px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.guide-analysis-progress-steps li {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: #64748b;
+  text-align: center;
+}
+
+.guide-analysis-progress-steps li > span {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 2px solid #cbd5e1;
+  border-radius: 50%;
+  background: #ffffff;
+  font-size: 0.7rem;
+  font-weight: 900;
+}
+
+.guide-analysis-progress-steps li > b {
+  max-width: 92px;
+  font-size: 0.6rem;
+  line-height: 1.25;
+}
+
+.guide-analysis-progress-steps li.is-complete {
+  color: #166534;
+}
+
+.guide-analysis-progress-steps li.is-complete > span {
+  border-color: #22c55e;
+  background: #dcfce7;
+}
+
+.guide-analysis-progress-steps li.is-current {
+  color: #1d4ed8;
+}
+
+.guide-analysis-progress-steps li.is-current > span {
+  border-color: #2563eb;
+  background: #dbeafe;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12);
+}
+
+.guide-analysis-progress-panel > p {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.78rem;
+  text-align: center;
+}
+
+.guide-patent-insight-panel {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  border-color: rgba(15, 118, 110, 0.28);
+  background: #ffffff;
+  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.07);
+}
+
+.guide-insight-icon {
+  position: relative;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: #ccfbf1;
+}
+
+.guide-insight-icon::before {
+  content: "";
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  width: 16px;
+  height: 16px;
+  border: 3px solid #0f766e;
   border-radius: 50%;
 }
 
-.guide-progress-track {
-  height: 8px;
-  overflow: hidden;
+.guide-insight-icon::after {
+  content: "";
+  position: absolute;
+  right: 8px;
+  bottom: 9px;
+  width: 11px;
+  height: 3px;
   border-radius: 999px;
-  background: #dbeafe;
+  background: #0f766e;
+  transform: rotate(45deg);
 }
 
-.guide-progress-track span {
-  display: block;
-  width: 68%;
-  height: 100%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, #2563eb, #60a5fa);
+.guide-insight-icon span {
+  position: absolute;
+  top: 17px;
+  left: 17px;
+  width: 8px;
+  height: 2px;
+  background: #0f766e;
+  box-shadow: 0 -5px 0 #0f766e, 0 5px 0 #0f766e;
 }
 
-.guide-analyze-layout p {
-  font-size: 0.78rem;
-  text-align: center;
+.guide-insight-copy {
+  display: grid;
+  gap: 4px;
+}
+
+.guide-insight-copy > span {
+  color: #0f766e;
+}
+
+.guide-insight-copy strong {
+  color: #0f172a;
+  font-size: 0.84rem;
+}
+
+.guide-insight-copy p {
+  margin: 0;
+  color: #475569;
+  font-size: 0.7rem;
+  line-height: 1.45;
+}
+
+.guide-insight-meta {
+  display: grid;
+  justify-items: end;
+  gap: 5px;
+  color: #64748b;
+  white-space: nowrap;
+}
+
+.guide-insight-meta span {
+  font-size: 0.58rem;
+}
+
+.guide-insight-meta b {
+  color: #0f766e;
+  font-size: 0.68rem;
+}
+
+.guide-callout-analysis {
+  top: 18px;
+  right: 19px;
+}
+
+.guide-callout-insight {
+  right: 19px;
+  bottom: 17px;
 }
 
 .guide-result-layout,
@@ -759,8 +919,14 @@
 
   .guide-plan-grid,
   .guide-result-grid,
-  .guide-query-grid {
+  .guide-query-grid,
+  .guide-analysis-progress-steps {
     gap: 12px;
+  }
+
+  .guide-analysis-progress-steps {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    row-gap: 11px;
   }
 
   .guide-pdf-layout {
@@ -804,6 +970,15 @@
 
   .guide-action-row {
     align-items: stretch;
+  }
+
+  .guide-patent-insight-panel {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .guide-insight-meta {
+    grid-column: 2;
+    justify-items: start;
   }
 
   .guide-primary-button,

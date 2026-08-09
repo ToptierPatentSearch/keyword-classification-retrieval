@@ -35,21 +35,12 @@ jobs:
           --config supabase/functions/analyze/deno.json
           supabase/functions/analyze/index.ts
 
-      - name: Run Deno regression tests
+      - name: Run analysis regression tests
         run: >-
           deno test
           --allow-env
           --config supabase/functions/analyze/deno.json
           supabase/functions/analyze/openaiLanguageTransform.test.ts
           supabase/functions/analyze/openaiLanguageAware.test.ts
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Run classification-domain regression tests
-        run: >-
-          node --test
           supabase/functions/analyze/reviewedClassificationDomain.test.mjs
           supabase/functions/analyze/searchQueryDomain.test.mjs

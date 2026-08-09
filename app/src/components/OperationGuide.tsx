@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { ANALYSIS_PROGRESS_STAGES } from "../analysisProgress";
 import "./operation-guide.css";
 
 type GuideStepId =
@@ -70,9 +71,14 @@ const guideSteps: GuideStep[] = [
     number: 4,
     title: "Run the analysis",
     description:
-      "Review the character count and remaining credits, and then select Analyze. The app displays a processing state while the request is running.",
+      "Review the character count and remaining credits, and then select Analyze patent text. While the request is running, the app reports the current backend stage and displays curated patent-search guidance.",
     caption:
-      "A successful analysis normally consumes one credit. Clear removes the current input and result so another analysis can be prepared.",
+      "The upper panel reports completed, current, and pending analysis stages. The lower panel rotates patent-search insights while processing continues.",
+    tips: [
+      "A green check mark identifies a completed stage; the blue marker identifies the current stage.",
+      "Patent Search Insight cards change automatically and do not alter the analysis result.",
+      "Wait for all six stages to finish before reviewing the generated output.",
+    ],
     warning:
       "Do not repeatedly select Analyze while the first request is still processing.",
   },
@@ -216,21 +222,52 @@ function GuideIllustration({ step }: { step: GuideStepId }) {
     return (
       <BrowserFrame>
         <div className="guide-analyze-layout" aria-hidden="true">
-          <div className="guide-text-area guide-text-area-compact">
-            Technical text is ready for analysis.
+          <div className="guide-analysis-progress-panel">
+            <div className="guide-analysis-progress-heading">
+              <span>BACKEND PROCESSING</span>
+              <strong>
+                Current stage: <b>Classification</b>
+              </strong>
+            </div>
+            <ol className="guide-analysis-progress-steps">
+              {ANALYSIS_PROGRESS_STAGES.map((stage, index) => {
+                const state =
+                  index < 3
+                    ? "is-complete"
+                    : index === 3
+                      ? "is-current"
+                      : "is-pending";
+
+                return (
+                  <li className={state} key={stage.id}>
+                    <span>{index < 3 ? "✓" : index + 1}</span>
+                    <b>{stage.label}</b>
+                  </li>
+                );
+              })}
+            </ol>
+            <p>Analyzing text securely through Supabase Edge Functions…</p>
           </div>
-          <div className="guide-action-row">
-            <div className="guide-secondary-button">Clear</div>
-            <div className="guide-primary-button guide-analyze-button">
-              <span className="guide-spinner" /> Analyze
+
+          <div className="guide-patent-insight-panel">
+            <div className="guide-insight-icon" aria-hidden="true">
+              <span />
+            </div>
+            <div className="guide-insight-copy">
+              <span>PATENT SEARCH INSIGHT</span>
+              <strong>Combine keyword and classification searching.</strong>
+              <p>
+                Keywords provide semantic flexibility, while IPC, CPC, FI, and
+                F-term classifications provide technical structure.
+              </p>
+            </div>
+            <div className="guide-insight-meta">
+              <span>Changes automatically</span>
+              <b>3 of 30</b>
             </div>
           </div>
-          <div className="guide-progress-track">
-            <span />
-          </div>
-          <p>Extracting concepts and retrieving classification candidates…</p>
-          <span className="guide-callout guide-callout-two">1</span>
-          <span className="guide-callout guide-callout-five">2</span>
+          <span className="guide-callout guide-callout-analysis">1</span>
+          <span className="guide-callout guide-callout-insight">2</span>
         </div>
       </BrowserFrame>
     );
@@ -366,9 +403,7 @@ export default function OperationGuide() {
         <ol>
           {guideSteps.map((step) => (
             <li key={step.id}>
-              <a href={`#guide-${step.id}`}>
-                {step.number}. {step.title}
-              </a>
+              <a href={`#guide-${step.id}`}>{step.title}</a>
             </li>
           ))}
         </ol>

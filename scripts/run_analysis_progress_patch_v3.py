@@ -57,13 +57,15 @@ replacement_effect = '''          useEffect(() => {
               return;
             }
 
+            const progressUserId: string = userId;
+            const progressRequestId: string = requestId;
             let cancelled = false;
             let timerId: number | null = null;
 
             async function pollAnalysisProgress() {
               const rows = await fetchAnalysisProgress(
-                userId,
-                requestId,
+                progressUserId,
+                progressRequestId,
               );
 '''
 

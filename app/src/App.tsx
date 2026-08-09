@@ -1066,53 +1066,52 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-}, [session?.user.id, creditRefreshKey]);
+  }, [session?.user.id, creditRefreshKey]);
 
-useEffect(() => {
-  const userId = session?.user.id;
-  const requestId = activeAnalysisRequestId;
+  useEffect(() => {
+    const userId = session?.user.id;
+    const requestId = activeAnalysisRequestId;
 
-  if (!loading || !userId || !requestId) {
-    return;
-  }
-
-  const progressUserId: string = userId;
-  const progressRequestId: string = requestId;
-  let cancelled = false;
-  let timerId: number | null = null;
-
-  async function pollAnalysisProgress() {
-    const rows = await fetchAnalysisProgress(
-      progressUserId,
-      progressRequestId,
-    );
-
-    if (cancelled || rows === null) {
+    if (!loading || !userId || !requestId) {
       return;
     }
 
-    if (rows.length > 0) {
-      setAnalysisProgress(rows);
+    const progressUserId: string = userId;
+    const progressRequestId: string = requestId;
+    let cancelled = false;
+    let timerId: number | null = null;
+
+    async function pollAnalysisProgress() {
+      const rows = await fetchAnalysisProgress(
+        progressUserId,
+        progressRequestId,
+      );
+
+      if (cancelled || rows === null) {
+        return;
+      }
+
+      if (rows.length > 0) {
+        setAnalysisProgress(rows);
+      }
+
+      timerId = window.setTimeout(() => {
+        void pollAnalysisProgress();
+      }, 500);
     }
 
-    timerId = window.setTimeout(() => {
-      void pollAnalysisProgress();
-    }, 500);
-  }
+    void pollAnalysisProgress();
 
-  void pollAnalysisProgress();
+    return () => {
+      cancelled = true;
 
-  return () => {
-    cancelled = true;
+      if (timerId !== null) {
+        window.clearTimeout(timerId);
+      }
+    };
+  }, [loading, session?.user.id, activeAnalysisRequestId]);
 
-    if (timerId !== null) {
-      window.clearTimeout(timerId);
-    }
-  };
-}, [loading, session?.user.id, activeAnalysisRequestId]);
-
-const sortedKeywords = useMemo(
-
+  const sortedKeywords = useMemo(
     () =>
       Array.isArray(result?.keywords)
         ? result.keywords.slice().sort((a, b) => a.rank - b.rank)
@@ -1235,21 +1234,20 @@ const sortedKeywords = useMemo(
         inputFingerprint,
       };
 
-pendingAnalyzeRequestRef.current = pendingRequest;
-storePendingAnalysisRequest(pendingRequest);
-setActiveAnalysisRequestId(requestId);
-setAnalysisProgress([
-  {
-    stage: "input_review",
-    stage_index: 0,
-    status: "running",
-    error_message: null,
-    updated_at: new Date().toISOString(),
-  },
-]);
+      pendingAnalyzeRequestRef.current = pendingRequest;
+      storePendingAnalysisRequest(pendingRequest);
+      setActiveAnalysisRequestId(requestId);
+      setAnalysisProgress([
+        {
+          stage: "input_review",
+          stage_index: 0,
+          status: "running",
+          error_message: null,
+          updated_at: new Date().toISOString(),
+        },
+      ]);
 
-const { data, error: functionError } = await supabase.functions.invoke<
-
+      const { data, error: functionError } = await supabase.functions.invoke<
         AnalysisResult & {
           requestId?: string;
           remainingCredits: number;
@@ -1337,17 +1335,17 @@ const { data, error: functionError } = await supabase.functions.invoke<
         throw new Error("Analyze returned no updated credit balance.");
       }
 
-const finalProgress = await fetchAnalysisProgress(
-  activeSession.user.id,
-  requestId,
-);
+      const finalProgress = await fetchAnalysisProgress(
+        activeSession.user.id,
+        requestId,
+      );
 
-if (finalProgress && finalProgress.length > 0) {
-  setAnalysisProgress(finalProgress);
-}
+      if (finalProgress && finalProgress.length > 0) {
+        setAnalysisProgress(finalProgress);
+      }
 
-setResult(data);
-pendingAnalyzeRequestRef.current = null;
+      setResult(data);
+      pendingAnalyzeRequestRef.current = null;
 
       clearPendingAnalysisRequest();
       setRemainingCreditsAfterAnalysis(data.remainingCredits);

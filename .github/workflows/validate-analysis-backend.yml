@@ -1,0 +1,46 @@
+name: Validate analysis backend
+
+on:
+  push:
+    paths:
+      - "supabase/functions/analyze/**"
+      - "supabase/migrations/**"
+      - ".github/workflows/validate-analysis-backend.yml"
+  pull_request:
+    paths:
+      - "supabase/functions/analyze/**"
+      - "supabase/migrations/**"
+      - ".github/workflows/validate-analysis-backend.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Type-check analyze Edge Function
+        run: >-
+          deno check
+          --config supabase/functions/analyze/deno.json
+          supabase/functions/analyze/index.ts
+
+      - name: Run analysis regression tests
+        run: >-
+          deno test
+          --allow-env
+          --config supabase/functions/analyze/deno.json
+          supabase/functions/analyze/openaiLanguageTransform.test.ts
+          supabase/functions/analyze/openaiLanguageAware.test.ts
+          supabase/functions/analyze/reviewedClassificationDomain.test.mjs
+          supabase/functions/analyze/searchQueryDomain.test.mjs

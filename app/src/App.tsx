@@ -16,6 +16,11 @@ import type {
 import { PricingPlans } from "./components/PricingPlans";
 import TryDemoPage from "./components/TryDemoPage";
 import SearchQueryStarter from "./components/SearchQueryStarter";
+import AnalysisProgress from "./components/AnalysisProgress";
+import {
+  fetchAnalysisProgress,
+  type AnalysisProgressRow,
+} from "./analysisProgress";
 import { buildSearchQueryStarter } from "./searchQuery";
 import { formatLocalAndUtcTimestamp } from "./lib/time";
 import {
@@ -757,6 +762,12 @@ export default function App() {
   const [text, setText] = useState("");
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const [activeAnalysisRequestId, setActiveAnalysisRequestId] = useState<
+    string | null
+  >(null);
+  const [analysisProgress, setAnalysisProgress] = useState<
+    AnalysisProgressRow[]
+  >([]);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [error, setError] = useState("");
   const [creditRefreshKey, setCreditRefreshKey] = useState(0);
@@ -1057,6 +1068,49 @@ export default function App() {
     };
   }, [session?.user.id, creditRefreshKey]);
 
+  useEffect(() => {
+    const userId = session?.user.id;
+    const requestId = activeAnalysisRequestId;
+
+    if (!loading || !userId || !requestId) {
+      return;
+    }
+
+    const progressUserId: string = userId;
+    const progressRequestId: string = requestId;
+    let cancelled = false;
+    let timerId: number | null = null;
+
+    async function pollAnalysisProgress() {
+      const rows = await fetchAnalysisProgress(
+        progressUserId,
+        progressRequestId,
+      );
+
+      if (cancelled || rows === null) {
+        return;
+      }
+
+      if (rows.length > 0) {
+        setAnalysisProgress(rows);
+      }
+
+      timerId = window.setTimeout(() => {
+        void pollAnalysisProgress();
+      }, 500);
+    }
+
+    void pollAnalysisProgress();
+
+    return () => {
+      cancelled = true;
+
+      if (timerId !== null) {
+        window.clearTimeout(timerId);
+      }
+    };
+  }, [loading, session?.user.id, activeAnalysisRequestId]);
+
   const sortedKeywords = useMemo(
     () =>
       Array.isArray(result?.keywords)
@@ -1133,6 +1187,8 @@ export default function App() {
     setLoading(true);
     setError("");
     setResult(null);
+    setActiveAnalysisRequestId(null);
+    setAnalysisProgress([]);
     setRemainingCreditsAfterAnalysis(null);
 
     try {
@@ -1180,6 +1236,16 @@ export default function App() {
 
       pendingAnalyzeRequestRef.current = pendingRequest;
       storePendingAnalysisRequest(pendingRequest);
+      setActiveAnalysisRequestId(requestId);
+      setAnalysisProgress([
+        {
+          stage: "input_review",
+          stage_index: 0,
+          status: "running",
+          error_message: null,
+          updated_at: new Date().toISOString(),
+        },
+      ]);
 
       const { data, error: functionError } = await supabase.functions.invoke<
         AnalysisResult & {
@@ -1269,8 +1335,18 @@ export default function App() {
         throw new Error("Analyze returned no updated credit balance.");
       }
 
+      const finalProgress = await fetchAnalysisProgress(
+        activeSession.user.id,
+        requestId,
+      );
+
+      if (finalProgress && finalProgress.length > 0) {
+        setAnalysisProgress(finalProgress);
+      }
+
       setResult(data);
       pendingAnalyzeRequestRef.current = null;
+
       clearPendingAnalysisRequest();
       setRemainingCreditsAfterAnalysis(data.remainingCredits);
       setRemainingCredits(data.remainingCredits);
@@ -1289,6 +1365,8 @@ export default function App() {
   function handleClear() {
     pendingAnalyzeRequestRef.current = null;
     clearPendingAnalysisRequest();
+    setActiveAnalysisRequestId(null);
+    setAnalysisProgress([]);
     setText("");
     setResult(null);
     setError("");
@@ -1317,6 +1395,8 @@ export default function App() {
     await supabase.auth.signOut();
     pendingAnalyzeRequestRef.current = null;
     clearPendingAnalysisRequest();
+    setActiveAnalysisRequestId(null);
+    setAnalysisProgress([]);
     clearLocalConsent();
     setTermsAccepted(false);
     setConsentStatus("idle");
@@ -1759,10 +1839,17 @@ export default function App() {
       )}
 
       {loading && (
-        <p className="status-card">
-          Analyzing text securely through Supabase Edge Functions…{" "}
-          {estimatedResultTime}
-        </p>
+        <section
+          className="status-card analysis-progress-card"
+          aria-live="polite"
+          aria-label="Backend analysis progress"
+        >
+          <AnalysisProgress rows={analysisProgress} />
+          <p className="analysis-progress-summary">
+            Analyzing text securely through Supabase Edge Functions…{" "}
+            {estimatedResultTime}
+          </p>
+        </section>
       )}
       {result && (
         <section className="card results-card">

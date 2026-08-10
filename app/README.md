@@ -66,10 +66,10 @@ Set the OpenAI key as an Edge Function secret:
 supabase secrets set OPENAI_API_KEY=sk-your-key
 ```
 
-The analyze function uses `gpt-5.6` by default. Set the deployed model explicitly through the Supabase secret:
+The analyze function uses `gpt-5.6-luna` by default. Set the deployed model explicitly through the Supabase secret:
 
 ```bash
-supabase secrets set OPENAI_MODEL=gpt-5.6
+supabase secrets set OPENAI_MODEL=gpt-5.6-luna
 ```
 
 ## 4. Deploy the Edge Function

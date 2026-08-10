@@ -21,7 +21,7 @@ Deno.test("query review is completed locally without an external AI call", async
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        model: "gpt-5.6",
+        model: "gpt-5.6-luna",
         input: [
           {
             role: "system",

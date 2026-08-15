@@ -685,18 +685,7 @@ function LandingPage({ onAcceptTerms, onOpenDemo }: LandingPageProps) {
           information.
         </p>
 
-        <div className="landing-demo-cta">
-          <button
-            className="landing-demo-button"
-            type="button"
-            onClick={() => onOpenDemo("ai-image-recognition")}
-          >
-            <Sparkles aria-hidden="true" />
-            Try Demo
-            <ArrowRight aria-hidden="true" />
-          </button>
-          <span>No sign-in required · No analysis credit used</span>
-        </div>
+        
 
         <div className="landing-section">
           <h2>Brief Features</h2>

@@ -1,3 +1,8 @@
+/* The standalone Try Demo CTA duplicates the featured example analyses. */
+.landing-page .landing-demo-cta {
+  display: none;
+}
+
 .demo-showcase {
   width: min(1180px, calc(100% - 40px));
   margin: 72px auto;
@@ -32,8 +37,10 @@
 
 .demo-showcase-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
   gap: 24px;
+  max-width: 820px;
+  margin: 0 auto;
 }
 
 .demo-showcase-card {
@@ -122,20 +129,10 @@
   height: 18px;
 }
 
-@media (max-width: 900px) {
-  .demo-showcase-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
 @media (max-width: 640px) {
   .demo-showcase {
     width: min(100% - 24px, 1180px);
     margin: 48px auto;
-  }
-
-  .demo-showcase-grid {
-    grid-template-columns: 1fr;
   }
 
   .demo-showcase-card {

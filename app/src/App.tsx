@@ -1,3 +1,7 @@
+import DemoShowcase, {
+  type FeaturedDemoId,
+} from "./components/DemoShowcase";
+import { getDemoCase } from "./components/demoData";
 import Footer from "./components/Footer";
 import termsOfUseText from "./components/terms-of-use.txt?raw";
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
@@ -662,7 +666,7 @@ function estimateResultTime(characterCount: number): string {
 }
 type LandingPageProps = {
   onAcceptTerms: () => void;
-  onOpenDemo: () => void;
+  onOpenDemo: (demoId: FeaturedDemoId) => void;
 };
 
 function LandingPage({ onAcceptTerms, onOpenDemo }: LandingPageProps) {
@@ -685,7 +689,7 @@ function LandingPage({ onAcceptTerms, onOpenDemo }: LandingPageProps) {
           <button
             className="landing-demo-button"
             type="button"
-            onClick={onOpenDemo}
+            onClick={() => onOpenDemo("ai-image-recognition")}
           >
             <Sparkles aria-hidden="true" />
             Try Demo
@@ -704,6 +708,9 @@ function LandingPage({ onAcceptTerms, onOpenDemo }: LandingPageProps) {
             </li>
             <li>Processes analysis securely after authentication.</li>
           </ul>
+        </div>
+        <div className="landing-section">
+          <DemoShowcase onOpenDemo={onOpenDemo} />
         </div>
         <div className="landing-section">
           <h2>Terms of Use</h2>
@@ -790,17 +797,16 @@ export default function App() {
     | "admin-error-logs"
     | "admin-package-purchases"
   >(() =>
-    window.location.hash === "#/demo"
-      ? "demo"
+    window.location.hash.startsWith("#/demo") ? "demo"
       : window.location.hash === "#/admin/error-logs"
-      ? "admin-error-logs"
-      : window.location.hash === "#/admin/package-purchases"
-      ? "admin-package-purchases"
-      : window.location.hash === "#/admin/user-consents"
-        ? "admin-user-consents"
-        : window.location.hash === "#/admin/user-activity"
-          ? "admin-user-activity"
-          : "analysis",
+        ? "admin-error-logs"
+        : window.location.hash === "#/admin/package-purchases"
+          ? "admin-package-purchases"
+          : window.location.hash === "#/admin/user-consents"
+            ? "admin-user-consents"
+            : window.location.hash === "#/admin/user-activity"
+              ? "admin-user-activity"
+              : "analysis",
   );
   const analyzeInFlightRef = useRef(false);
   const adminMenuRef = useRef<HTMLDivElement | null>(null);
@@ -843,17 +849,17 @@ export default function App() {
   useEffect(() => {
     function updateRoute() {
       setCurrentRoute(
-        window.location.hash === "#/demo"
+        window.location.hash.startsWith("#/demo")
           ? "demo"
           : window.location.hash === "#/admin/error-logs"
-          ? "admin-error-logs"
-          : window.location.hash === "#/admin/package-purchases"
-          ? "admin-package-purchases"
-          : window.location.hash === "#/admin/user-consents"
-            ? "admin-user-consents"
-            : window.location.hash === "#/admin/user-activity"
-              ? "admin-user-activity"
-              : "analysis",
+            ? "admin-error-logs"
+            : window.location.hash === "#/admin/package-purchases"
+              ? "admin-package-purchases"
+              : window.location.hash === "#/admin/user-consents"
+                ? "admin-user-consents"
+                : window.location.hash === "#/admin/user-activity"
+                  ? "admin-user-activity"
+                  : "analysis",
       );
     }
 
@@ -1145,12 +1151,12 @@ export default function App() {
         authMode === "sign-in"
           ? await supabase.auth.signInWithPassword({ email, password })
           : await supabase.auth.signUp({
-              email,
-              password,
-              options: {
-                emailRedirectTo: `${window.location.origin}/keyword-classification-retrieval/`,
-              },
-            });
+            email,
+            password,
+            options: {
+              emailRedirectTo: `${window.location.origin}/keyword-classification-retrieval/`,
+            },
+          });
       if (authError) {
         throw authError;
       }
@@ -1421,8 +1427,14 @@ export default function App() {
   }
 
   if (currentRoute === "demo") {
+    const demoId = window.location.hash.startsWith("#/demo/")
+      ? window.location.hash.slice("#/demo/".length)
+      : null;
+
+    const selectedDemo = getDemoCase(demoId);
     return (
       <TryDemoPage
+        demo={selectedDemo}
         continueLabel={
           session && termsAccepted
             ? "Open analysis workspace"
@@ -1442,8 +1454,8 @@ export default function App() {
     return (
       <LandingPage
         onAcceptTerms={handleAcceptTerms}
-        onOpenDemo={() => {
-          window.location.hash = "#/demo";
+        onOpenDemo={(demoId) => {
+          window.location.hash = `#/demo/${demoId}`;
         }}
       />
     );
@@ -1629,9 +1641,8 @@ export default function App() {
               <div className="admin-menu" ref={adminMenuRef}>
                 <button
                   type="button"
-                  className={`secondary compact-button admin-menu-trigger${
-                    isAdminMenuOpen ? " is-open" : ""
-                  }`}
+                  className={`secondary compact-button admin-menu-trigger${isAdminMenuOpen ? " is-open" : ""
+                    }`}
                   aria-haspopup="true"
                   aria-expanded={isAdminMenuOpen}
                   aria-controls="administration-menu"

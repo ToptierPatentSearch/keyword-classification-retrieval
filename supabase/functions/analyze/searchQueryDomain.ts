@@ -7,6 +7,7 @@ export interface SearchQueryDomainCandidate {
   code: string;
   title_en?: string | null;
   title_ja?: string | null;
+  ancestor_titles?: string[];
 }
 
 export interface SearchQueryDomainConcept {
@@ -43,7 +44,8 @@ interface DomainPrefixScore {
   anchoredCodeKeys: Set<string>;
 }
 
-const DOMAIN_NEUTRAL_TOKENS = new Set([
+const DOMAIN_NEUTRAL_TOKEN_KEYS = new Set([
+  "analysis",
   "apparatus",
   "component",
   "control",
@@ -58,11 +60,15 @@ const DOMAIN_NEUTRAL_TOKENS = new Set([
   "including",
   "means",
   "method",
+  "network",
+  "neural",
   "normal",
   "object",
   "operation",
   "presence",
   "procedure",
+  "processing",
+  "recognition",
   "safety",
   "sensor",
   "signal",
@@ -74,7 +80,7 @@ const DOMAIN_NEUTRAL_TOKENS = new Set([
   "use",
   "using",
   "value",
-]);
+].map(tokenFamilyKey));
 
 function tokenFamilyKey(token: string): string {
   const normalized = token.normalize("NFKC").trim().toLowerCase();
@@ -128,9 +134,13 @@ function domainAnchorKeys(concept: SearchQueryDomainConcept): Set<string> {
       ...concept.search_phrases,
     ]
       .flatMap(domainTokens)
-      .filter((token) => !DOMAIN_NEUTRAL_TOKENS.has(token))
       .map(tokenFamilyKey)
-      .filter((token) => Boolean(token) && !/^\d+$/u.test(token)),
+      .filter(
+        (token) =>
+          Boolean(token) &&
+          !DOMAIN_NEUTRAL_TOKEN_KEYS.has(token) &&
+          !/^\d+$/u.test(token),
+      ),
   );
 }
 
@@ -152,7 +162,13 @@ function normalizedCodeKey(
 
 function candidateTitleKeys(candidate: SearchQueryDomainCandidate): Set<string> {
   return new Set(
-    domainTokens(`${candidate.title_en ?? ""} ${candidate.title_ja ?? ""}`)
+    domainTokens(
+      [
+        candidate.title_en ?? "",
+        candidate.title_ja ?? "",
+        ...(candidate.ancestor_titles ?? []),
+      ].join(" "),
+    )
       .map(tokenFamilyKey)
       .filter(Boolean),
   );
@@ -160,12 +176,13 @@ function candidateTitleKeys(candidate: SearchQueryDomainCandidate): Set<string> 
 
 function scoreDomainPrefix(score: DomainPrefixScore): number {
   return (
-    score.codeKeys.size +
+    Math.min(2, score.codeKeys.size) +
     score.systems.size +
-    score.anchorKeys.size * 4 +
-    score.anchoredCodeKeys.size * 3
+    score.anchorKeys.size * 5 +
+    Math.min(2, score.anchoredCodeKeys.size) * 2
   );
 }
+
 
 /**
  * Limits query-review options to the document's dominant classification

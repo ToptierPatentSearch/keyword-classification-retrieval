@@ -67,7 +67,10 @@ interface ClassificationCandidate {
   theme_title_ja?: string | null;
   fi_scope?: string[];
   matched_terms?: string[];
+  retrieval_term?: string;
+  retrieval_term_index?: number;
   source_area_codes?: string[];
+  ancestor_titles?: string[];
 }
 
 interface FTermThemeCandidate {
@@ -961,8 +964,23 @@ function titleForSearchQueryCode(
   result: AnalysisResult,
   system: "IPC" | "CPC",
   code: string,
-): { title_en: string | null; title_ja: string | null } {
+): {
+  title_en: string | null;
+  title_ja: string | null;
+  ancestor_titles?: string[];
+} {
   const normalizedCode = normalizeClassificationCode(code);
+
+  const matchedCandidate = result.keywords
+    .flatMap((keyword) =>
+      system === "IPC"
+        ? keyword.ipc_candidates ?? []
+        : keyword.cpc_candidates ?? []
+    )
+    .find(
+      (candidate) =>
+        normalizeClassificationCode(candidate.code) === normalizedCode,
+    );
 
   for (const keyword of result.keywords) {
     for (const area of keyword.classification_route?.ipc_cpc_area ?? []) {
@@ -973,12 +991,14 @@ function titleForSearchQueryCode(
         return {
           title_en: area.title_en ?? null,
           title_ja: area.title_ja ?? null,
+          ancestor_titles: matchedCandidate?.ancestor_titles ?? [],
         };
       }
     }
 
     const evidence =
       system === "IPC" ? keyword.ipc_evidence : keyword.cpc_evidence;
+
     const matchedEvidence = evidence?.find(
       (item) => normalizeClassificationCode(item.code) === normalizedCode,
     );
@@ -987,11 +1007,16 @@ function titleForSearchQueryCode(
       return {
         title_en: matchedEvidence.title_en ?? null,
         title_ja: matchedEvidence.title_ja ?? null,
+        ancestor_titles: matchedCandidate?.ancestor_titles ?? [],
       };
     }
   }
 
-  return { title_en: null, title_ja: null };
+  return {
+    title_en: matchedCandidate?.title_en ?? null,
+    title_ja: matchedCandidate?.title_ja ?? null,
+    ancestor_titles: matchedCandidate?.ancestor_titles ?? [],
+  };
 }
 
 function searchQueryIdArraySchema(ids: string[]) {
@@ -1323,12 +1348,17 @@ Return only structured JSON matching the schema.`,
     ipcOptions,
     cpcOptions,
   );
-  const reviewed = buildReviewedSearchQueriesFromIds(
+  const reviewedByAi = buildReviewedSearchQueriesFromIds(
     selection,
     termOptions,
     ipcOptions,
     cpcOptions,
   );
+
+  const reviewed = {
+    ...reviewedByAi,
+    classificationQuery: buildGooglePatentsCpcQuery(allowedCodes),
+  };
   const filteredCandidate = {
     keywordQuery: candidate.keywordQuery,
     classificationQuery: buildGooglePatentsCpcQuery(allowedCodes),
@@ -1336,7 +1366,7 @@ Return only structured JSON matching the schema.`,
 
   const reviewStatus: SearchQueryReviewStatus =
     reviewed.keywordQuery === filteredCandidate.keywordQuery &&
-    reviewed.classificationQuery === filteredCandidate.classificationQuery
+      reviewed.classificationQuery === filteredCandidate.classificationQuery
       ? "accepted"
       : "corrected";
 
@@ -1673,8 +1703,8 @@ function normalizeResult(
 ): AnalysisResult {
   const fallbackConceptTerm = Array.isArray(result.keywords)
     ? String(
-        result.keywords[0]?.normalized_term ?? result.keywords[0]?.term ?? "",
-      ).trim()
+      result.keywords[0]?.normalized_term ?? result.keywords[0]?.term ?? "",
+    ).trim()
     : "";
   const technicalConcept = normalizeTechnicalInterpretation(
     result.technical_concept,
@@ -1686,8 +1716,8 @@ function normalizeResult(
     .map((keyword) => {
       const confidence: Confidence =
         keyword.classification_confidence === "high" ||
-        keyword.classification_confidence === "medium" ||
-        keyword.classification_confidence === "low"
+          keyword.classification_confidence === "medium" ||
+          keyword.classification_confidence === "low"
           ? keyword.classification_confidence
           : "low";
 
@@ -1740,11 +1770,11 @@ function normalizeResult(
         );
       const reason = conceptLinked
         ? buildGroundedSelectionReason(
-            term || normalizedTerm,
-            conceptFacets,
-            conceptBasis,
-            sourceEvidence,
-          )
+          term || normalizedTerm,
+          conceptFacets,
+          conceptBasis,
+          sourceEvidence,
+        )
         : "";
 
       return {
@@ -1815,22 +1845,22 @@ function isValidTechnicalConcept(
 ): boolean {
   return Boolean(
     concept &&
-      concept.object_or_system.trim() &&
-      concept.purpose_or_problem.trim() &&
-      concept.application_or_use.trim() &&
-      concept.operation.trim() &&
-      concept.technical_effect.trim() &&
-      Array.isArray(concept.components) &&
-      concept.components.length > 0 &&
-      Array.isArray(concept.component_relationships) &&
-      concept.component_relationships.length > 0 &&
-      Array.isArray(concept.material_or_composition) &&
-      Array.isArray(concept.manufacturing_or_processing_steps) &&
-      Array.isArray(concept.control_means) &&
-      Array.isArray(concept.controlled_variables) &&
-      Array.isArray(concept.operating_conditions) &&
-      Array.isArray(concept.context_terms) &&
-      Array.isArray(concept.search_phrases),
+    concept.object_or_system.trim() &&
+    concept.purpose_or_problem.trim() &&
+    concept.application_or_use.trim() &&
+    concept.operation.trim() &&
+    concept.technical_effect.trim() &&
+    Array.isArray(concept.components) &&
+    concept.components.length > 0 &&
+    Array.isArray(concept.component_relationships) &&
+    concept.component_relationships.length > 0 &&
+    Array.isArray(concept.material_or_composition) &&
+    Array.isArray(concept.manufacturing_or_processing_steps) &&
+    Array.isArray(concept.control_means) &&
+    Array.isArray(concept.controlled_variables) &&
+    Array.isArray(concept.operating_conditions) &&
+    Array.isArray(concept.context_terms) &&
+    Array.isArray(concept.search_phrases),
   );
 }
 
@@ -1861,10 +1891,10 @@ function validateAnalysisReadyForCharge(
     result.keywords.length <= 40;
   const validSearchQueryStarter = Boolean(
     result.search_query_starter &&
-      validatedSearchQueryStarters.has(result.search_query_starter) &&
-      (result.search_query_starter.reviewStatus === "accepted" ||
-        result.search_query_starter.reviewStatus === "corrected") &&
-      result.search_query_starter.reviewSummary.trim(),
+    validatedSearchQueryStarters.has(result.search_query_starter) &&
+    (result.search_query_starter.reviewStatus === "accepted" ||
+      result.search_query_starter.reviewStatus === "corrected") &&
+    result.search_query_starter.reviewSummary.trim(),
   );
 
   const validKeywords =
@@ -2074,7 +2104,89 @@ async function loadCatalogRowsForCodes(
 
   return rowsByCode;
 }
+async function enrichClassificationCandidatesWithAncestors(
+  adminClient: SupabaseClient,
+  system: CatalogClassificationSystem,
+  candidates: ClassificationCandidate[],
+): Promise<ClassificationCandidate[]> {
+  if (candidates.length === 0) {
+    return candidates;
+  }
 
+  const parentCodes = Array.from(
+    new Set(
+      candidates
+        .map((candidate) => candidate.parent_code?.trim() ?? "")
+        .filter(Boolean),
+    ),
+  );
+
+  const parentRows = await loadCatalogRowsForCodes(
+    adminClient,
+    system,
+    parentCodes,
+  );
+
+  const grandparentCodes = Array.from(
+    new Set(
+      Array.from(parentRows.values())
+        .map((parent) => parent.parent_code?.trim() ?? "")
+        .filter(Boolean),
+    ),
+  );
+
+  const grandparentRows = await loadCatalogRowsForCodes(
+    adminClient,
+    system,
+    grandparentCodes,
+  );
+  const greatGrandparentCodes = Array.from(
+    new Set(
+      Array.from(grandparentRows.values())
+        .map((grandparent) => grandparent.parent_code?.trim() ?? "")
+        .filter(Boolean),
+    ),
+  );
+
+  const greatGrandparentRows = await loadCatalogRowsForCodes(
+    adminClient,
+    system,
+    greatGrandparentCodes,
+  );
+  return candidates.map((candidate) => {
+    const parent = candidate.parent_code
+      ? parentRows.get(normalizeClassificationCode(candidate.parent_code))
+      : undefined;
+
+    const grandparent = parent?.parent_code
+      ? grandparentRows.get(normalizeClassificationCode(parent.parent_code))
+      : undefined;
+    const greatGrandparent = grandparent?.parent_code
+      ? greatGrandparentRows.get(
+        normalizeClassificationCode(grandparent.parent_code),
+      )
+      : undefined;
+    const ancestorTitles = Array.from(
+      new Set(
+        [
+          parent?.title_en ?? "",
+          parent?.title_ja ?? "",
+          grandparent?.title_en ?? "",
+          grandparent?.title_ja ?? "",
+          greatGrandparent?.title_en ?? "",
+          greatGrandparent?.title_ja ?? "",
+        ]
+          .map((title) => title.trim())
+          .filter(Boolean),
+      ),
+    );
+
+    return {
+      ...candidate,
+      ancestor_titles: ancestorTitles,
+    };
+  });
+}
 function addCatalogCodes(
   target: Record<CatalogClassificationSystem, string[]>,
   system: CatalogClassificationSystem,
@@ -2198,6 +2310,13 @@ function technicalTokens(text: string): string[] {
 }
 
 const GENERIC_CLASSIFICATION_CONTEXT_TOKENS = new Set([
+  "and",
+  "or",
+  "the",
+  "for",
+  "that",
+  "this",
+  "are",
   "system",
   "systems",
   "device",
@@ -2225,6 +2344,7 @@ const GENERIC_CLASSIFICATION_CONTEXT_TOKENS = new Set([
   "technical",
   "operation",
   "operations",
+  "processing",
   "effect",
   "effects",
   "based",
@@ -2295,8 +2415,19 @@ function keywordIdentityTokenKeys(keyword: KeywordClassification): Set<string> {
   };
 
   addTokens(technicalTokens(keyword.term));
-  addTokens(technicalTokens(keyword.normalized_term));
+  const normalizedTokens = technicalTokens(keyword.normalized_term);
 
+  if (normalizedTokens.length > 0) {
+    const latinTokens = normalizedTokens.filter((token) =>
+      /^[a-z][a-z0-9-]*$/u.test(token)
+    );
+
+    if (latinTokens.length > 0) {
+      addTokens([latinTokens[latinTokens.length - 1]]);
+    } else if (normalizedTokens.length === 1) {
+      addTokens(normalizedTokens);
+    }
+  }
   for (const synonym of keyword.synonyms) {
     const tokens = technicalTokens(synonym);
     if (tokens.length === 0) continue;
@@ -2355,7 +2486,18 @@ function candidateTokenFamilyKeys(
       .filter(Boolean),
   );
 }
-
+function candidateHierarchyTokenFamilyKeys(
+  candidate: ClassificationCandidate,
+): Set<string> {
+  return new Set([
+    ...candidateTokenFamilyKeys(candidate),
+    ...(candidate.ancestor_titles ?? []).flatMap((title) =>
+      technicalTokens(title)
+        .map(classificationTokenFamilyKey)
+        .filter(Boolean),
+    ),
+  ]);
+}
 function technicalTokenFamilyKeys(value: string): string[] {
   return Array.from(
     new Set(
@@ -2418,21 +2560,62 @@ function hasStrongMultiwordSearchSupport(
     return keys.length >= 2 && candidateSupportsTerm(candidate, term);
   });
 }
+function candidateHasHighTechnicalTitleCoverage(
+  candidate: ClassificationCandidate,
+  searchTerms: string[],
+  rankingTerms: string[],
+): boolean {
+  const candidateKeys = technicalTokenFamilyKeys(candidateTitle(candidate));
 
+  if (candidateKeys.length < 2) {
+    return false;
+  }
+
+  const supportedKeys = new Set(
+    [...searchTerms, ...rankingTerms].flatMap(technicalTokenFamilyKeys),
+  );
+
+  const supportedCount = candidateKeys.filter((key) =>
+    supportedKeys.has(key),
+  ).length;
+
+  return supportedCount / candidateKeys.length >= 0.8;
+}
 function candidatePassesContextGate(
   candidate: ClassificationCandidate,
   contextAnchorTokens: string[],
   searchTerms: string[],
+  rankingTerms: string[],
 ): boolean {
   if (contextAnchorTokens.length === 0) {
     return hasStrongMultiwordSearchSupport(candidate, searchTerms);
   }
 
-  return candidateContextAnchorHits(candidate, contextAnchorTokens).length > 0;
+  if (candidateContextAnchorHits(candidate, contextAnchorTokens).length > 0) {
+    return true;
+  }
+
+  const hierarchyKeys = candidateHierarchyTokenFamilyKeys(candidate);
+  const hierarchyContextHitCount = contextAnchorTokens.filter((token) => {
+    const key = classificationTokenFamilyKey(token);
+    return Boolean(key) && hierarchyKeys.has(key);
+  }).length;
+
+  return (
+    hasStrongMultiwordSearchSupport(candidate, searchTerms) &&
+    (
+      candidateHasHighTechnicalTitleCoverage(
+        candidate,
+        searchTerms,
+        rankingTerms,
+      ) ||
+      hierarchyContextHitCount > 0
+    )
+  );
 }
 
 const GENERIC_CLASSIFICATION_KEYWORD_HEADS = new Set([
-  'sensor', 'detector', 'controller', 'processor', 'module', 'unit',
+  'object', 'sensor', 'detector', 'controller', 'processor', 'module', 'unit',
   'device', 'system', 'signal', 'data', 'camera', 'motor', 'actuator',
   'interface', 'circuit', 'network', 'component', 'element', 'mechanism',
   'apparatus', 'memory', 'terminal', 'server', 'client', 'control', 'position',
@@ -2453,8 +2636,36 @@ function keywordHeadFamilyKey(keyword: KeywordClassification): string {
 function isGenericClassificationKeyword(
   keyword: KeywordClassification,
 ): boolean {
-  const head = keywordHeadFamilyKey(keyword);
-  return Boolean(head) && GENERIC_CLASSIFICATION_KEYWORD_HEADS.has(head);
+  const preferredTokens = technicalTokens(
+    keyword.normalized_term || keyword.term,
+  ).filter((token) => /^[a-z][a-z0-9-]*$/u.test(token));
+
+  const fallbackTokens = technicalTokens(keyword.term).filter((token) =>
+    /^[a-z][a-z0-9-]*$/u.test(token),
+  );
+
+  const tokens =
+    preferredTokens.length > 0 ? preferredTokens : fallbackTokens;
+
+  const familyKeys = tokens
+    .map(classificationTokenFamilyKey)
+    .filter(Boolean);
+
+  if (familyKeys.length === 0) return false;
+
+  const head = familyKeys[familyKeys.length - 1];
+
+  if (!GENERIC_CLASSIFICATION_KEYWORD_HEADS.has(head)) {
+    return false;
+  }
+
+  if (familyKeys.length === 1) {
+    return true;
+  }
+
+  return familyKeys.every((key) =>
+    GENERIC_CLASSIFICATION_KEYWORD_HEADS.has(key),
+  );
 }
 
 function classificationDomainAnchorTokens(
@@ -2463,8 +2674,8 @@ function classificationDomainAnchorTokens(
 ): string[] {
   const keywordIdentityKeys = keywordIdentityTokenKeys(keyword);
   const primaryValues = [
-    technicalConcept.object_or_system,
     technicalConcept.application_or_use,
+    technicalConcept.object_or_system,
   ];
   const fallbackValues = technicalConcept.context_terms;
 
@@ -2484,15 +2695,122 @@ function classificationDomainAnchorTokens(
   const primary = collect(primaryValues);
   return primary.length > 0 ? primary : collect(fallbackValues);
 }
+function candidateAncestorDomainAnchorHits(
+  candidate: ClassificationCandidate,
+  domainAnchorTokens: string[],
+): string[] {
+  const ancestorKeys = new Set(
+    (candidate.ancestor_titles ?? [])
+      .flatMap(technicalTokenFamilyKeys),
+  );
 
+  return domainAnchorTokens.filter((token) => {
+    const key = classificationTokenFamilyKey(token);
+    return Boolean(key) && ancestorKeys.has(key);
+  });
+}
+const WEAK_CLASSIFICATION_DOMAIN_ANCHORS = new Set(
+  [
+    "analysis",
+    "recognition",
+  ].map(classificationTokenFamilyKey),
+);
+
+function candidateStrongAncestorDomainAnchorHits(
+  candidate: ClassificationCandidate,
+  domainAnchorTokens: string[],
+): string[] {
+  return candidateAncestorDomainAnchorHits(
+    candidate,
+    domainAnchorTokens,
+  ).filter((token) => {
+    const key = classificationTokenFamilyKey(token);
+
+    return (
+      Boolean(key) &&
+      !WEAK_CLASSIFICATION_DOMAIN_ANCHORS.has(key)
+    );
+  });
+}
 function candidatePassesDomainGate(
   candidate: ClassificationCandidate,
   domainAnchorTokens: string[],
   genericKeyword: boolean,
+  searchTerms: string[],
 ): boolean {
-  if (!genericKeyword) return true;
-  if (domainAnchorTokens.length === 0) return false;
-  return candidateDomainAnchorHits(candidate, domainAnchorTokens).length > 0;
+  if (domainAnchorTokens.length === 0) {
+    return !genericKeyword;
+  }
+
+  const domainKeys = Array.from(
+    new Set(
+      domainAnchorTokens
+        .map(classificationTokenFamilyKey)
+        .filter(Boolean),
+    ),
+  );
+
+  const leafKeys = candidateTokenFamilyKeys(candidate);
+  const leafHitCount = domainKeys.filter((key) =>
+    leafKeys.has(key)
+  ).length;
+  const ancestorDomainHitCount =
+    candidateAncestorDomainAnchorHits(
+      candidate,
+      domainAnchorTokens,
+    ).length;
+  const strongAncestorDomainHitCount =
+    candidateStrongAncestorDomainAnchorHits(
+      candidate,
+      domainAnchorTokens,
+    ).length;
+
+  if (
+    (candidate.system === "IPC" || candidate.system === "CPC") &&
+    (candidate.retrieval_term_index ?? 0) > 0 &&
+    leafHitCount === 0 &&
+    ancestorDomainHitCount > 0 &&
+    strongAncestorDomainHitCount === 0
+  ) {
+    return false;
+  }
+  if (
+    (candidate.system === "IPC" || candidate.system === "CPC") &&
+    leafHitCount >= 2 &&
+    ancestorDomainHitCount === 0
+  ) {
+    return false;
+  }
+
+  // Generic keywords still require direct leaf-title domain support.
+  if (genericKeyword) {
+    const requiredLeafHits = Math.min(2, domainKeys.length);
+    return requiredLeafHits > 0 && leafHitCount >= requiredLeafHits;
+  }
+
+  const hierarchyKeys = candidateHierarchyTokenFamilyKeys(candidate);
+  const supportedDomainHitCount = domainKeys.filter((key) =>
+    hierarchyKeys.has(key)
+  ).length;
+
+  const requiredHits = Math.min(2, domainKeys.length);
+
+  if (requiredHits > 0 && supportedDomainHitCount >= requiredHits) {
+    return true;
+  }
+
+  // A specific keyword with strong direct multiword support may use one
+  // hierarchy domain anchor. It still cannot bypass domain validation entirely.
+  const strongSupportedDomainHitCount = domainKeys.filter(
+    (key) =>
+      hierarchyKeys.has(key) &&
+      !GENERIC_CLASSIFICATION_KEYWORD_HEADS.has(key),
+  ).length;
+
+  return (
+    strongSupportedDomainHitCount >= 1 &&
+    hasStrongMultiwordSearchSupport(candidate, searchTerms)
+  );
 }
 
 function classificationSubclassPrefix(code: string): string {
@@ -2537,7 +2855,40 @@ function hasKeywordLexicalSupport(
 ): boolean {
   return keywordLexicalTerms.some((term) => candidateSupportsTerm(candidate, term));
 }
+function candidateHasUnsupportedLeafSpecialization(
+  candidate: ClassificationCandidate,
+  keywordLexicalTerms: string[],
+  rankingTerms: string[],
+): boolean {
+  const leafKeys = technicalTokenFamilyKeys(candidateTitle(candidate));
 
+  const keywordKeys = new Set(
+    keywordLexicalTerms.flatMap(technicalTokenFamilyKeys),
+  );
+
+  const supportedKeys = new Set(
+    [...keywordLexicalTerms, ...rankingTerms].flatMap(
+      technicalTokenFamilyKeys,
+    ),
+  );
+
+  const specializationKeys = leafKeys.filter(
+    (key) => !keywordKeys.has(key),
+  );
+
+  if (specializationKeys.length < 2) {
+    return false;
+  }
+
+  const unsupportedKeys = specializationKeys.filter(
+    (key) => !supportedKeys.has(key),
+  );
+
+  return (
+    unsupportedKeys.length >= 2 &&
+    unsupportedKeys.length / specializationKeys.length >= 0.5
+  );
+}
 function calculateCandidateMatchScore(
   candidate: ClassificationCandidate,
   searchTerms: string[],
@@ -2556,7 +2907,9 @@ function calculateCandidateMatchScore(
   const contextWords = Array.from(
     new Set(rankingTerms.flatMap(technicalTokenFamilyKeys)),
   ).filter((word) => !queryWordSet.has(word));
-  const candidateKeys = candidateTokenFamilyKeys(candidate);
+  const leafCandidateKeys = candidateTokenFamilyKeys(candidate);
+  const hierarchyCandidateKeys =
+    candidateHierarchyTokenFamilyKeys(candidate);
   const anchorHits = candidateContextAnchorHits(candidate, contextAnchorTokens);
   const domainHits = candidateDomainAnchorHits(candidate, domainAnchorTokens);
   let score = Math.min(0.32, Number(candidate.similarity_score) || 0);
@@ -2568,16 +2921,42 @@ function calculateCandidateMatchScore(
     (term) => term !== primarySearchTerm && candidateSupportsTerm(candidate, term),
   ).length;
   score += Math.min(0.08, exactPhraseHits * 0.04);
-
-  const queryWordHits = queryWords.filter((word) => candidateKeys.has(word)).length;
+  if (
+    candidateHasHighTechnicalTitleCoverage(
+      candidate,
+      searchTerms,
+      rankingTerms,
+    )
+  ) {
+    score += 0.07;
+  }
+  const queryWordHits = queryWords.filter((word) =>
+    leafCandidateKeys.has(word)
+  ).length;
   const queryCoverage = queryWords.length > 0 ? queryWordHits / queryWords.length : 0;
   score += Math.min(0.13, queryCoverage * 0.13);
 
-  const contextHits = contextWords.filter((word) => candidateKeys.has(word)).length;
+  const contextHits = contextWords.filter((word) =>
+    hierarchyCandidateKeys.has(word)
+  ).length;
   const contextCoverage = contextWords.length > 0 ? contextHits / contextWords.length : 0;
+  const hierarchyAnchorKeys = Array.from(
+    new Set(
+      [...contextAnchorTokens, ...domainAnchorTokens]
+        .map(classificationTokenFamilyKey)
+        .filter(Boolean),
+    ),
+  );
+
+  const hierarchyOnlyAnchorHits = hierarchyAnchorKeys.filter(
+    (key) =>
+      hierarchyCandidateKeys.has(key) &&
+      !leafCandidateKeys.has(key),
+  ).length;
   score += Math.min(0.09, contextHits * 0.01 + contextCoverage * 0.045);
   score += Math.min(0.2, anchorHits.length * 0.1);
   score += Math.min(0.2, domainHits.length * 0.1);
+  score += Math.min(0.12, hierarchyOnlyAnchorHits * 0.04);
   return Math.max(0, Math.min(1, score));
 }
 
@@ -2596,7 +2975,7 @@ async function searchClassificationCandidates(
   ).slice(0, 8);
   const candidatesByCode = new Map<string, ClassificationCandidate>();
 
-  for (const searchText of uniqueSearchTerms) {
+  for (const [searchTermIndex, searchText] of uniqueSearchTerms.entries()) {
     const { data, error } = await adminClient.rpc('search_classification_titles', {
       search_text: searchText,
       requested_systems: [system],
@@ -2610,12 +2989,34 @@ async function searchClassificationCandidates(
       const normalizedCode = normalizeClassificationCode(candidate.code);
       const previous = candidatesByCode.get(normalizedCode);
       if (!previous || Number(candidate.similarity_score) > Number(previous.similarity_score)) {
-        candidatesByCode.set(normalizedCode, candidate);
+        candidatesByCode.set(normalizedCode, {
+          ...candidate,
+          retrieval_term: searchText,
+          retrieval_term_index: searchTermIndex,
+        });
       }
     }
   }
 
-  const scoredCandidates = Array.from(candidatesByCode.values()).map((candidate) => {
+  const lexicalCandidates = Array.from(candidatesByCode.values()).filter(
+    (candidate) =>
+      hasKeywordLexicalSupport(candidate, keywordLexicalTerms) ||
+      candidateHasHighTechnicalTitleCoverage(
+        candidate,
+        uniqueSearchTerms,
+        contextTerms,
+      ),
+  );
+  const hierarchyCandidates =
+    system === "IPC" || system === "CPC"
+      ? await enrichClassificationCandidatesWithAncestors(
+        adminClient,
+        system,
+        lexicalCandidates,
+      )
+      : lexicalCandidates;
+
+  const scoredCandidates = hierarchyCandidates.map((candidate) => {
     const matchedTerms = uniqueSearchTerms.filter((term) =>
       candidateSupportsTerm(candidate, term),
     );
@@ -2660,10 +3061,39 @@ async function searchClassificationCandidates(
       const neighborhoodMatch = Boolean(prefix) && neighborhoodPrefixes.has(prefix);
       return (
         (candidate.match_score ?? 0) >= 0.38 &&
-        hasKeywordLexicalSupport(candidate, keywordLexicalTerms) &&
-        candidatePassesContextGate(candidate, contextAnchorTokens, uniqueSearchTerms) &&
-        candidatePassesDomainGate(candidate, domainAnchorTokens, genericKeyword) &&
-        (!genericKeyword || neighborhoodPrefixes.size === 0 || neighborhoodMatch)
+        (
+          hasKeywordLexicalSupport(candidate, keywordLexicalTerms) ||
+          candidateHasHighTechnicalTitleCoverage(
+            candidate,
+            uniqueSearchTerms,
+            contextTerms,
+          )
+        ) &&
+        candidatePassesContextGate(
+          candidate,
+          contextAnchorTokens,
+          uniqueSearchTerms,
+          contextTerms
+        ) &&
+        candidatePassesDomainGate(
+          candidate,
+          domainAnchorTokens,
+          genericKeyword,
+          uniqueSearchTerms,
+        ) &&
+        !candidateHasUnsupportedLeafSpecialization(
+          candidate,
+          keywordLexicalTerms,
+          contextTerms,
+        ) &&
+        (
+          neighborhoodPrefixes.size === 0 ||
+          neighborhoodMatch ||
+          (
+            !genericKeyword &&
+            hasKeywordLexicalSupport(candidate, keywordLexicalTerms)
+          )
+        )
       );
     })
     .sort(
@@ -2684,7 +3114,7 @@ function buildClassificationLookupContext(
   const interpretation = technicalConcept;
   const keywordLexicalTerms = Array.from(
     new Set(
-      [keyword.normalized_term, keyword.term, ...keyword.synonyms]
+      [keyword.term, keyword.normalized_term, ...keyword.synonyms]
         .map((value) => value.trim())
         .filter(Boolean),
     ),
@@ -2694,8 +3124,16 @@ function buildClassificationLookupContext(
     `${interpretation.object_or_system} ${keyword.term}`,
     `${interpretation.application_or_use} ${keyword.normalized_term}`,
   ];
+  const conceptBasisSearchTerms = keyword.concept_basis
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .slice(0, 2);
   const searchTerms = Array.from(
-    new Set([...keywordLexicalTerms, ...contextualizedKeywordTerms]
+    new Set([
+      ...keywordLexicalTerms,
+      ...conceptBasisSearchTerms,
+      ...contextualizedKeywordTerms,
+    ]
       .map((value) => value.trim())
       .filter(Boolean)),
   ).slice(0, 8);
@@ -2788,12 +3226,12 @@ function candidateAreaCodes(
 
         return Boolean(
           areaNormalized &&
-            candidateNormalized &&
-            (candidateNormalized.startsWith(areaNormalized) ||
-              areaNormalized.startsWith(candidateNormalized) ||
-              (areaMainGroup &&
-                candidateMainGroup &&
-                areaMainGroup === candidateMainGroup)),
+          candidateNormalized &&
+          (candidateNormalized.startsWith(areaNormalized) ||
+            areaNormalized.startsWith(candidateNormalized) ||
+            (areaMainGroup &&
+              candidateMainGroup &&
+              areaMainGroup === candidateMainGroup)),
         );
       });
     })
@@ -2807,9 +3245,9 @@ function fiMatchesScope(fiCode: string, fiScope: string[]): boolean {
     const normalizedScope = normalizeClassificationCode(scopeCode);
     return Boolean(
       normalizedFi &&
-        normalizedScope &&
-        (normalizedFi.startsWith(normalizedScope) ||
-          normalizedScope.startsWith(normalizedFi)),
+      normalizedScope &&
+      (normalizedFi.startsWith(normalizedScope) ||
+        normalizedScope.startsWith(normalizedFi)),
     );
   });
 }
@@ -2965,10 +3403,10 @@ async function searchFTermThemeCandidates(
       const matchScore = Math.min(
         1,
         Math.min(0.48, theme.similarity_score) +
-          Math.min(0.24, queryHits * 0.06) +
-          Math.min(0.12, contextHits * 0.025) +
-          Math.min(0.12, matchedTerms.length * 0.04) +
-          0.12,
+        Math.min(0.24, queryHits * 0.06) +
+        Math.min(0.12, contextHits * 0.025) +
+        Math.min(0.12, matchedTerms.length * 0.04) +
+        0.12,
       );
 
       return { ...theme, matched_terms: matchedTerms, match_score: matchScore };
@@ -3065,8 +3503,8 @@ async function searchFTermAspectCandidates(
         match_score: Math.min(
           1,
           semanticScore +
-            (scopeMatches ? 0.2 : 0) +
-            Math.min(0.12, matchedTerms.length * 0.04),
+          (scopeMatches ? 0.2 : 0) +
+          Math.min(0.12, matchedTerms.length * 0.04),
         ),
       };
     })
@@ -3144,13 +3582,13 @@ async function lookupAndRankClassifications(
         const keyword = enrichedKeywords[keywordIndex];
 
         const {
-  searchTerms,
-  rankingTerms,
-  contextAnchorTokens,
-  domainAnchorTokens,
-  keywordLexicalTerms,
-  genericKeyword,
-} = buildClassificationLookupContext(
+          searchTerms,
+          rankingTerms,
+          contextAnchorTokens,
+          domainAnchorTokens,
+          keywordLexicalTerms,
+          genericKeyword,
+        } = buildClassificationLookupContext(
           keyword,
           result.technical_concept,
           contextTerms,
@@ -3164,8 +3602,8 @@ async function lookupAndRankClassifications(
             rankingTerms,
             contextAnchorTokens,
             domainAnchorTokens,
-                keywordLexicalTerms,
-                genericKeyword,
+            keywordLexicalTerms,
+            genericKeyword,
           ),
           searchClassificationCandidates(
             adminClient,
@@ -3174,8 +3612,8 @@ async function lookupAndRankClassifications(
             rankingTerms,
             contextAnchorTokens,
             domainAnchorTokens,
-                keywordLexicalTerms,
-                genericKeyword,
+            keywordLexicalTerms,
+            genericKeyword,
           ),
         ]);
 
@@ -3197,15 +3635,15 @@ async function lookupAndRankClassifications(
         const rawFiCandidates =
           selectedAreas.length > 0
             ? await searchClassificationCandidates(
-                adminClient,
-                searchTerms,
-                "FI",
-                rankingTerms,
-                contextAnchorTokens,
-                domainAnchorTokens,
-                keywordLexicalTerms,
-                genericKeyword,
-              )
+              adminClient,
+              searchTerms,
+              "FI",
+              rankingTerms,
+              contextAnchorTokens,
+              domainAnchorTokens,
+              keywordLexicalTerms,
+              genericKeyword,
+            )
             : [];
         const fiCandidates = rawFiCandidates
           .map((candidate) => ({

@@ -170,7 +170,7 @@ test("withholds all classifications when no CPC domain is approved", () => {
   assert.match(result.keywords[0].classification_reason, /were withheld/);
 });
 
-test("describes query review as deterministic server validation", () => {
+test("describes AI query review with server validation", () => {
   const result = {
     keywords: [],
     search_query_starter: {
@@ -181,6 +181,6 @@ test("describes query review as deterministic server validation", () => {
 
   applyReviewedClassificationDomainGate(result, "");
 
-  assert.match(result.search_query_starter.reviewSummary, /Server validation/);
-  assert.match(result.search_query_starter.reviewSummary, /No separate AI/);
+  assert.match(result.search_query_starter.reviewSummary, /AI reviewed/);
+  assert.match(result.search_query_starter.reviewSummary, /server validation/);
 });

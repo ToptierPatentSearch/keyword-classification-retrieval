@@ -8,69 +8,24 @@ import {
   Sparkles,
 } from "lucide-react";
 import SearchQueryStarter from "./SearchQueryStarter";
-import type { GeneratedSearchQueryStarter } from "../searchQuery";
+import type { DemoCase } from "./demoData"; 
 import "./TryDemoPage.css";
 
-const DEMO_TECHNICAL_EXAMPLE = `An electric-vehicle wireless charging system includes a ground-side power-transmitting coil, a vehicle-side power-receiving coil, and a camera that detects alignment markers around the charging pad. A controller estimates lateral and angular misalignment from the camera images and adjusts the vehicle parking position before energizing the transmitting coil. During power transfer, the controller monitors coupling efficiency and coil temperature, then changes the inverter frequency and transmitted power to maintain charging efficiency while preventing overheating.`;
-
-const DEMO_KEYWORDS = [
-  {
-    term: "electric-vehicle wireless charging",
-    synonyms: "contactless EV charging · inductive vehicle charging",
-  },
-  {
-    term: "coil alignment control",
-    synonyms: "charging-pad positioning · coil misalignment correction",
-  },
-  {
-    term: "coupling-efficiency optimization",
-    synonyms: "power-transfer efficiency control · resonant coupling adjustment",
-  },
-  {
-    term: "coil temperature protection",
-    synonyms: "thermal monitoring · overheating prevention",
-  },
-];
-
-const DEMO_CLASSIFICATIONS = [
-  {
-    system: "IPC / CPC",
-    code: "B60L 53/12",
-    title: "Inductive energy transfer for electrically propelled vehicles",
-  },
-  {
-    system: "IPC / CPC",
-    code: "B60L 53/38",
-    title: "Automatic or assisted alignment of charging devices and vehicles",
-  },
-  {
-    system: "IPC / CPC",
-    code: "H02J 50/10",
-    title: "Circuit arrangements for inductive wireless power transfer",
-  },
-];
-
-const DEMO_QUERY_STARTER: GeneratedSearchQueryStarter = {
-  keywordQuery:
-    '("wireless EV charging" OR "inductive vehicle charging") AND ("coil alignment" OR "coil misalignment correction") AND ("coupling-efficiency optimization" OR "coil temperature protection")',
-  classificationQuery:
-    "(CPC=B60L53/38 OR CPC=H02J50/10)",
-  reviewStatus: "demo",
-  reviewSummary:
-    "This demonstration query was pre-reviewed for technical relevance, Boolean structure, and use of the displayed classification codes.",
-};
 
 type TryDemoPageProps = {
+  demo: DemoCase;
   onBack: () => void;
   onContinue: () => void;
   continueLabel: string;
 };
 
 export default function TryDemoPage({
+  demo,
   onBack,
   onContinue,
   continueLabel,
 }: TryDemoPageProps) {
+
   return (
     <main className="demo-page">
       <header className="demo-header">
@@ -99,8 +54,8 @@ export default function TryDemoPage({
             See technical text become <span>search-ready insight</span>
           </h1>
           <p>
-            This read-only example previews the app’s patent-search workflow
-            using a preselected electric-vehicle wireless-charging concept.
+            This read-only example previews the app&apos;s patent-search workflow
+            using the preselected {demo.title} concept.
           </p>
         </div>
         <aside className="demo-access-note">
@@ -143,13 +98,13 @@ export default function TryDemoPage({
             </span>
             <span>
               <small>Preselected technical example</small>
-              <h2>EV wireless charging</h2>
+              <h2>{demo.title}</h2>
             </span>
           </div>
           <label htmlFor="demo-technical-text">Technical text</label>
           <textarea
             id="demo-technical-text"
-            value={DEMO_TECHNICAL_EXAMPLE}
+            value={demo.technicalExample}
             readOnly
             aria-readonly="true"
           />
@@ -162,24 +117,19 @@ export default function TryDemoPage({
         <div className="demo-results">
           <article className="demo-panel demo-concept-panel">
             <p className="demo-result-label">Common technical concept</p>
-            <h2>Adaptive alignment and safe power-transfer control</h2>
-            <p>
-              A wireless EV charging system uses image-based coil positioning,
-              efficiency feedback, and temperature monitoring to establish and
-              maintain efficient inductive power transfer.
-            </p>
+            <h2>{demo.conceptTitle}</h2>
+            <p>{demo.conceptDescription}</p>
             <div className="demo-facet-row">
-              <span>Object/system</span>
-              <span>Component relationships</span>
-              <span>Control means</span>
-              <span>Technical effect</span>
+              {demo.facets.map((facet) => (
+                <span key={facet}>{facet}</span>
+              ))}
             </div>
           </article>
 
           <article className="demo-panel">
             <p className="demo-result-label">Keywords &amp; synonyms</p>
             <div className="demo-keyword-list">
-              {DEMO_KEYWORDS.map((keyword) => (
+              {demo.keywords.map((keyword) => (
                 <div key={keyword.term} className="demo-keyword">
                   <CheckCircle2 aria-hidden="true" />
                   <span>
@@ -196,7 +146,7 @@ export default function TryDemoPage({
               Representative classification mapping
             </p>
             <div className="demo-classification-list">
-              {DEMO_CLASSIFICATIONS.map((item) => (
+              {demo.classifications.map((item) => (
                 <div key={item.code} className="demo-classification">
                   <span>{item.system}</span>
                   <strong>{item.code}</strong>
@@ -207,7 +157,7 @@ export default function TryDemoPage({
           </article>
 
           <SearchQueryStarter
-            starter={DEMO_QUERY_STARTER}
+            starter={demo.queryStarter}
             className="demo-panel"
           />
         </div>

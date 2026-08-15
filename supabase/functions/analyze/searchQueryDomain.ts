@@ -80,6 +80,7 @@ const DOMAIN_NEUTRAL_TOKEN_KEYS = new Set([
   "use",
   "using",
   "value",
+  "with",
 ].map(tokenFamilyKey));
 
 function tokenFamilyKey(token: string): string {

@@ -1,6 +1,7 @@
 import type {
   AnalysisResult,
   ClassificationCodeEvidence,
+  ClassificationSystem,
   KeywordClassification,
 } from "./types";
 import {
@@ -10,22 +11,67 @@ import {
 
 const MAX_KEYWORD_GROUPS = 5;
 const MAX_TERMS_PER_GROUP = 3;
+const BROAD_GROUPS = 2;
+const BALANCED_GROUPS = 3;
+const PRECISION_GROUPS = MAX_KEYWORD_GROUPS;
 
 export const SEARCH_QUERY_REVIEW_NOTICE =
-  "Formatted for Google Patents Advanced Search. Treat this as a starting point: refine the query, verify the current CPC scope, and validate the retrieved results before relying on them.";
+  "These database-specific queries are search starting points. Verify the current syntax and classification scope in the target system, review the retrieved results, and refine the strategy before relying on it.";
+
+export type SearchDatabaseId =
+  | "google_patents"
+  | "patentscope"
+  | "uspto"
+  | "j_platpat";
+
+export type SearchStrategyId = "query1" | "query2" | "query3";
+
+export type GeneratedSearchStrategy = {
+  id: SearchStrategyId;
+  label: string;
+  purpose: string;
+  query: string;
+  classificationFilters: string[];
+  recommended: boolean;
+  copyText: string;
+};
+
+export type GeneratedSearchDatabase = {
+  id: SearchDatabaseId;
+  label: string;
+  syntaxLabel: string;
+  note: string;
+  strategies: GeneratedSearchStrategy[];
+};
 
 export type GeneratedSearchQueryStarter = {
+  // Legacy fields are retained so existing demo data and downstream callers
+  // remain compatible while the UI migrates to the multi-database structure.
   keywordQuery: string;
   classificationQuery: string;
   reviewStatus: "accepted" | "corrected" | "demo" | "unreviewed";
   reviewSummary: string;
+  databases?: GeneratedSearchDatabase[];
 };
+
+type VerifiedClassificationCodes = Record<ClassificationSystem, string[]>;
 
 function cleanQueryValue(value: string | null | undefined): string {
   return (value ?? "")
     .replace(/["“”]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function cleanClassificationCode(value: string | null | undefined): string {
+  return (value ?? "").normalize("NFKC").replace(/\s+/g, " ").trim();
+}
+
+function compactClassificationCode(value: string): string {
+  return value
+    .normalize("NFKC")
+    .toUpperCase()
+    .replace(/[^A-Z0-9/]/g, "");
 }
 
 function uniqueValues(values: Array<string | null | undefined>): string[] {
@@ -61,6 +107,19 @@ function buildKeywordGroup(keyword: KeywordClassification): string {
   return `(${terms.map((term) => `"${term}"`).join(" OR ")})`;
 }
 
+function buildKeywordGroups(result: AnalysisResult): string[] {
+  return (Array.isArray(result.keywords) ? result.keywords : [])
+    .slice()
+    .sort((a, b) => a.rank - b.rank)
+    .slice(0, MAX_KEYWORD_GROUPS)
+    .map(buildKeywordGroup)
+    .filter(Boolean);
+}
+
+function joinKeywordGroups(groups: string[], count: number): string {
+  return groups.slice(0, Math.max(1, count)).join(" AND ");
+}
+
 function addVerifiedEvidence(
   target: Set<string>,
   evidence: ClassificationCodeEvidence[] | undefined,
@@ -70,7 +129,7 @@ function addVerifiedEvidence(
       continue;
     }
 
-    const code = cleanQueryValue(item.code);
+    const code = cleanClassificationCode(item.code);
 
     if (code) {
       target.add(code);
@@ -78,64 +137,491 @@ function addVerifiedEvidence(
   }
 }
 
-function buildClassificationQuery(result: AnalysisResult): string {
-  const cpcCodes = new Set<string>();
+function collectVerifiedClassificationCodes(
+  result: AnalysisResult,
+): VerifiedClassificationCodes {
+  const collected: Record<ClassificationSystem, Set<string>> = {
+    IPC: new Set<string>(),
+    CPC: new Set<string>(),
+    FI: new Set<string>(),
+    "F-term": new Set<string>(),
+  };
 
-  for (const keyword of Array.isArray(result.keywords)
-    ? result.keywords
-    : []) {
+  for (const keyword of Array.isArray(result.keywords) ? result.keywords : []) {
     for (const area of keyword.classification_route?.ipc_cpc_area ?? []) {
-      const code = cleanQueryValue(area.code);
-
-      if (!code || area.status !== "database_verified") {
+      if (area.status !== "database_verified") {
         continue;
       }
 
-      if (area.system === "CPC") {
-        cpcCodes.add(code);
+      const code = cleanClassificationCode(area.code);
+      if (code) {
+        collected[area.system].add(code);
       }
     }
 
-    addVerifiedEvidence(cpcCodes, keyword.cpc_evidence);
+    for (const subdivision of keyword.classification_route?.fi_subdivisions ?? []) {
+      if (subdivision.fi.status === "database_verified") {
+        const fiCode = cleanClassificationCode(subdivision.fi.code);
+        if (fiCode) {
+          collected.FI.add(fiCode);
+        }
+      }
+
+      for (const theme of subdivision.f_term_themes ?? []) {
+        for (const aspect of theme.aspects ?? []) {
+          if (aspect.status !== "database_verified") {
+            continue;
+          }
+
+          const fTermCode = cleanClassificationCode(aspect.code);
+          if (fTermCode) {
+            collected["F-term"].add(fTermCode);
+          }
+        }
+      }
+    }
+
+    addVerifiedEvidence(collected.IPC, keyword.ipc_evidence);
+    addVerifiedEvidence(collected.CPC, keyword.cpc_evidence);
+    addVerifiedEvidence(collected.FI, keyword.fi_evidence);
+    addVerifiedEvidence(collected["F-term"], keyword.f_term_evidence);
   }
 
-  return buildGooglePatentsCpcQuery(Array.from(cpcCodes));
+  return {
+    IPC: Array.from(collected.IPC).sort((a, b) => a.localeCompare(b)),
+    CPC: Array.from(collected.CPC).sort((a, b) => a.localeCompare(b)),
+    FI: Array.from(collected.FI).sort((a, b) => a.localeCompare(b)),
+    "F-term": Array.from(collected["F-term"]).sort((a, b) => a.localeCompare(b)),
+  };
+}
+
+function combineWithAnd(...parts: string[]): string {
+  return parts.filter(Boolean).join(" AND ");
+}
+
+function buildPatentscopeClassificationQuery(codes: VerifiedClassificationCodes): string {
+  if (codes.CPC.length > 0) {
+    return `CPC:(${codes.CPC.join(" OR ")})`;
+  }
+
+  if (codes.IPC.length > 0) {
+    return `IC:(${codes.IPC.join(" OR ")})`;
+  }
+
+  return "";
+}
+
+function buildUsptoCpcQuery(cpcCodes: string[]): string {
+  const compactCodes = Array.from(
+    new Set(cpcCodes.map(compactClassificationCode).filter(Boolean)),
+  ).sort((a, b) => a.localeCompare(b));
+
+  if (compactCodes.length === 0) {
+    return "";
+  }
+
+  if (compactCodes.length === 1) {
+    return `${compactCodes[0]}.cpc.`;
+  }
+
+  return `(${compactCodes.map((code) => `${code}.cpc.`).join(" OR ")})`;
+}
+
+function makeStrategy(
+  id: SearchStrategyId,
+  label: string,
+  purpose: string,
+  query: string,
+  classificationFilters: string[] = [],
+  recommended = false,
+): GeneratedSearchStrategy {
+  const filterText = classificationFilters.length
+    ? `\n${classificationFilters.join("\n")}`
+    : "";
+
+  return {
+    id,
+    label,
+    purpose,
+    query,
+    classificationFilters,
+    recommended,
+    copyText: `${query}${filterText}`.trim(),
+  };
+}
+function joinPrecisionKeywordGroups(groups: string[]): string {
+  const selectedGroups = groups.slice(0, PRECISION_GROUPS);
+
+  if (selectedGroups.length > BALANCED_GROUPS) {
+    return selectedGroups.join(" AND ");
+  }
+
+  return selectedGroups
+    .map((group) => {
+      const trimmed = group.trim();
+      const inner =
+        trimmed.startsWith("(") && trimmed.endsWith(")")
+          ? trimmed.slice(1, -1)
+          : trimmed;
+
+      const firstTerm = inner.split(/\s+OR\s+/i)[0]?.trim() ?? "";
+      return firstTerm ? `(${firstTerm})` : "";
+    })
+    .filter(Boolean)
+    .join(" AND ");
+}
+function getBroadGroupCount(groups: string[]): number {
+  if (groups.length <= 1) return 1;
+  return Math.min(BROAD_GROUPS, groups.length - 1);
+}
+
+function buildGooglePatentsDatabase(
+  groups: string[],
+  codes: VerifiedClassificationCodes,
+  balancedKeywordQuery: string,
+): GeneratedSearchDatabase {
+  const broad = joinKeywordGroups(groups, getBroadGroupCount(groups));
+  const balanced = groups.length > 0
+    ? joinKeywordGroups(groups, BALANCED_GROUPS)
+    : balancedKeywordQuery;
+  const precision = joinPrecisionKeywordGroups(groups);
+  const cpc = buildGooglePatentsCpcQuery(codes.CPC);
+
+  return {
+    id: "google_patents",
+    label: "Google Patents",
+    syntaxLabel: "Google Patents Advanced Search",
+    note: "Uses Boolean keyword groups plus database-verified CPC codes when available.",
+    strategies: [
+      makeStrategy(
+        "query1",
+        "Query 1 - Broad discovery",
+        "High-recall text search for terminology, neighboring concepts, and seed documents.",
+        broad,
+      ),
+      makeStrategy(
+        "query2",
+        "Query 2 - Balanced",
+        "Recommended starting point: combines the principal concepts with verified CPC scope when available.",
+        combineWithAnd(balanced, cpc),
+        [],
+        true,
+      ),
+      makeStrategy(
+        "query3",
+        "Query 3 - Precision",
+        "Uses additional concept groups when available; otherwise narrows synonym alternatives while retaining verified CPC scope.",
+        combineWithAnd(precision, cpc),
+      ),
+    ],
+  };
+}
+
+function buildPatentscopeDatabase(
+  language: AnalysisResult["language"],
+  groups: string[],
+  codes: VerifiedClassificationCodes,
+  balancedKeywordQuery: string,
+): GeneratedSearchDatabase {
+  const textField = language === "ja" ? "JA_ALLTXT" : "EN_ALLTXT";
+  const wrapText = (query: string) => (query ? `${textField}:(${query})` : "");
+  const classification = buildPatentscopeClassificationQuery(codes);
+
+  return {
+    id: "patentscope",
+    label: "PATENTSCOPE",
+    syntaxLabel: "PATENTSCOPE Advanced Search",
+    note: `Targets ${textField} and adds CPC (or IPC fallback) classification syntax when verified codes are available.`,
+    strategies: [
+      makeStrategy(
+        "query1",
+        "Query 1 - Broad discovery",
+        "High-recall full-text search using the strongest concept groups.",
+        wrapText(joinKeywordGroups(groups, getBroadGroupCount(groups))),
+      ),
+      makeStrategy(
+        "query2",
+        "Query 2 - Balanced",
+        "Recommended starting point: full-text concepts plus a verified classification condition when available.",
+        combineWithAnd(
+          wrapText(
+            groups.length > 0
+              ? joinKeywordGroups(groups, BALANCED_GROUPS)
+              : balancedKeywordQuery,
+          ),
+          classification,
+        ),
+        [],
+        true,
+      ),
+      makeStrategy(
+        "query3",
+        "Query 3 - Precision",
+        "Uses additional concept groups when available; otherwise narrows synonym alternatives while keeping the verified classification condition.",
+        combineWithAnd(
+          wrapText(joinPrecisionKeywordGroups(groups)),
+          classification,
+        ),
+      ),
+    ],
+  };
+}
+
+function buildUsptoDatabase(
+  groups: string[],
+  codes: VerifiedClassificationCodes,
+  balancedKeywordQuery: string,
+): GeneratedSearchDatabase {
+  const cpc = buildUsptoCpcQuery(codes.CPC);
+
+  return {
+    id: "uspto",
+    label: "USPTO Patent Public Search",
+    syntaxLabel: "Patent Public Search Advanced Search",
+    note: "Uses Boolean text terms and the .cpc. field code with spaces removed from CPC symbols.",
+    strategies: [
+      makeStrategy(
+        "query1",
+        "Query 1 - Broad discovery",
+        "High-recall Boolean text search for U.S. patents and published applications.",
+        joinKeywordGroups(groups, getBroadGroupCount(groups)),
+      ),
+      makeStrategy(
+        "query2",
+        "Query 2 - Balanced",
+        "Recommended starting point: principal text concepts plus verified CPC scope when available.",
+        combineWithAnd(
+          groups.length > 0
+            ? joinKeywordGroups(groups, BALANCED_GROUPS)
+            : balancedKeywordQuery,
+          cpc,
+        ),
+        [],
+        true,
+      ),
+      makeStrategy(
+        "query3",
+        "Query 3 - Precision",
+        "Uses additional concept groups when available; otherwise narrows synonym alternatives while retaining the CPC field restriction.",
+        combineWithAnd(joinPrecisionKeywordGroups(groups), cpc),
+      ),
+    ],
+  };
+}
+
+function formatJPlatPatFilter(label: string, codes: string[]): string {
+  return codes.length ? `${label}: ${codes.join(" OR ")}` : "";
+}
+
+function buildJPlatPatDatabase(
+  groups: string[],
+  codes: VerifiedClassificationCodes,
+  balancedKeywordQuery: string,
+): GeneratedSearchDatabase {
+  const balancedFilters = [
+    formatJPlatPatFilter("FI", codes.FI.length ? codes.FI : codes.IPC),
+  ].filter(Boolean);
+  const precisionFilters = [
+    ...balancedFilters,
+    formatJPlatPatFilter("F-term", codes["F-term"]),
+  ].filter(Boolean);
+
+  return {
+    id: "j_platpat",
+    label: "J-PlatPat",
+    syntaxLabel: "Patent/Utility Model Search - Selection Input",
+    note: "Use the keyword expression as the Full text search recipe, then apply the listed FI/F-term filters in the corresponding J-PlatPat classification fields. This avoids treating J-PlatPat as a Google-Patents-style one-line query.",
+    strategies: [
+      makeStrategy(
+        "query1",
+        "Query 1 - Broad discovery",
+        "High-recall Full text recipe without a classification restriction.",
+        joinKeywordGroups(groups, getBroadGroupCount(groups)),
+      ),
+      makeStrategy(
+        "query2",
+        "Query 2 - Balanced",
+        "Recommended starting point: principal Full text concepts plus verified FI (or IPC fallback) filters.",
+        groups.length > 0
+          ? joinKeywordGroups(groups, BALANCED_GROUPS)
+          : balancedKeywordQuery,
+        balancedFilters,
+        true,
+      ),
+      makeStrategy(
+        "query3",
+        "Query 3 - Precision",
+        "Uses additional Full text concept groups when available; otherwise narrows synonym alternatives, with F-term refinement when available.",
+        joinPrecisionKeywordGroups(groups),
+        precisionFilters,
+      ),
+    ],
+  };
+}
+
+function extractReviewedCpcCodes(result: AnalysisResult): string[] {
+  if (
+    !result.search_query_starter ||
+    (result.search_query_starter.reviewStatus !== "accepted" &&
+      result.search_query_starter.reviewStatus !== "corrected")
+  ) {
+    return [];
+  }
+
+  const normalized = normalizeGooglePatentsClassificationQuery(
+    result.search_query_starter.classificationQuery,
+  );
+
+  return Array.from(
+    new Set(
+      Array.from(normalized.matchAll(/CPC=([A-Z0-9/]+)/g), (match) => match[1]),
+    ),
+  ).sort((a, b) => a.localeCompare(b));
+}
+
+function buildLegacyClassificationQuery(result: AnalysisResult): string {
+  if (result.search_query_starter?.classificationQuery) {
+    return normalizeGooglePatentsClassificationQuery(
+      result.search_query_starter.classificationQuery,
+    );
+  }
+
+  const codes = collectVerifiedClassificationCodes(result);
+  return buildGooglePatentsCpcQuery(codes.CPC);
 }
 
 export function buildSearchQueryStarter(
   result: AnalysisResult,
 ): GeneratedSearchQueryStarter {
-  if (
-    result.search_query_starter &&
-    (result.search_query_starter.reviewStatus === "accepted" ||
-      result.search_query_starter.reviewStatus === "corrected")
-  ) {
-    return {
-      keywordQuery: result.search_query_starter.keywordQuery,
-      classificationQuery:
-        normalizeGooglePatentsClassificationQuery(
-          result.search_query_starter.classificationQuery,
-        ),
-      reviewStatus: result.search_query_starter.reviewStatus,
-      reviewSummary: result.search_query_starter.reviewSummary,
-    };
-  }
-
-  const keywordGroups = (Array.isArray(result.keywords)
-    ? result.keywords
-    : []
-  )
-    .slice()
-    .sort((a, b) => a.rank - b.rank)
-    .slice(0, MAX_KEYWORD_GROUPS)
-    .map(buildKeywordGroup)
-    .filter(Boolean);
+  const groups = buildKeywordGroups(result);
+  const evidenceCodes = collectVerifiedClassificationCodes(result);
+  const reviewedCpcCodes = extractReviewedCpcCodes(result);
+  const codes: VerifiedClassificationCodes = {
+    ...evidenceCodes,
+    CPC: reviewedCpcCodes.length > 0 ? reviewedCpcCodes : evidenceCodes.CPC,
+  };
+  const hasReviewedSource =
+    result.search_query_starter?.reviewStatus === "accepted" ||
+    result.search_query_starter?.reviewStatus === "corrected";
+  const balancedKeywordQuery = hasReviewedSource
+    ? result.search_query_starter?.keywordQuery.trim() || ""
+    : "";
+  const legacyKeywordQuery =
+    result.search_query_starter?.keywordQuery ||
+    joinKeywordGroups(groups, MAX_KEYWORD_GROUPS);
+  const legacyClassificationQuery = buildLegacyClassificationQuery(result);
+  const reviewStatus =
+    result.search_query_starter?.reviewStatus === "accepted" ||
+      result.search_query_starter?.reviewStatus === "corrected"
+      ? result.search_query_starter.reviewStatus
+      : "unreviewed";
+  const reviewSummary =
+    result.search_query_starter?.reviewSummary ||
+    "AI review was not included in this analysis result. Verify and refine the generated strategies before use.";
 
   return {
-    keywordQuery: keywordGroups.join(" AND "),
-    classificationQuery: buildClassificationQuery(result),
-    reviewStatus: "unreviewed",
-    reviewSummary:
-      "AI review was not included in this analysis result. Verify and refine the query before use.",
+    keywordQuery: legacyKeywordQuery,
+    classificationQuery: legacyClassificationQuery,
+    reviewStatus,
+    reviewSummary,
+    databases: [
+      buildGooglePatentsDatabase(groups, codes, balancedKeywordQuery),
+      buildPatentscopeDatabase(result.language, groups, codes, balancedKeywordQuery),
+      buildUsptoDatabase(groups, codes, balancedKeywordQuery),
+      buildJPlatPatDatabase(groups, codes, balancedKeywordQuery),
+    ],
   };
+}
+
+function splitTopLevelAndGroups(query: string): string[] {
+  const normalized = query.trim();
+  if (!normalized) {
+    return [];
+  }
+
+  const groups: string[] = [];
+  let depth = 0;
+  let inQuote = false;
+  let start = 0;
+
+  for (let index = 0; index < normalized.length; index += 1) {
+    const character = normalized[index];
+
+    if (character === '"') {
+      inQuote = !inQuote;
+      continue;
+    }
+
+    if (inQuote) {
+      continue;
+    }
+
+    if (character === "(") {
+      depth += 1;
+      continue;
+    }
+
+    if (character === ")") {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+
+    if (
+      depth === 0 &&
+      normalized.slice(index, index + 5).toUpperCase() === " AND "
+    ) {
+      const group = normalized.slice(start, index).trim();
+      if (group) {
+        groups.push(group);
+      }
+      index += 4;
+      start = index + 1;
+    }
+  }
+
+  const finalGroup = normalized.slice(start).trim();
+  if (finalGroup) {
+    groups.push(finalGroup);
+  }
+
+  return groups;
+}
+
+function extractCpcCodesFromLegacyQuery(query: string): string[] {
+  const normalized = normalizeGooglePatentsClassificationQuery(query);
+  return Array.from(
+    new Set(
+      Array.from(normalized.matchAll(/CPC=([A-Z0-9/]+)/g), (match) => match[1]),
+    ),
+  ).sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * Resolves the database strategies for both current analysis results and the
+ * older pre-reviewed landing-page demo objects. The fallback keeps demo data
+ * backward-compatible without weakening the current generated result shape.
+ */
+export function getSearchQueryDatabases(
+  starter: GeneratedSearchQueryStarter,
+): GeneratedSearchDatabase[] {
+  if (Array.isArray(starter.databases) && starter.databases.length > 0) {
+    return starter.databases;
+  }
+
+  const groups = splitTopLevelAndGroups(starter.keywordQuery);
+  const cpcCodes = extractCpcCodesFromLegacyQuery(starter.classificationQuery);
+  const codes: VerifiedClassificationCodes = {
+    IPC: [],
+    CPC: cpcCodes,
+    FI: [],
+    "F-term": [],
+  };
+  const balancedKeywordQuery = joinKeywordGroups(groups, BALANCED_GROUPS);
+
+  return [
+    buildGooglePatentsDatabase(groups, codes, balancedKeywordQuery),
+    buildPatentscopeDatabase("en", groups, codes, balancedKeywordQuery),
+    buildUsptoDatabase(groups, codes, balancedKeywordQuery),
+    buildJPlatPatDatabase(groups, codes, balancedKeywordQuery),
+  ];
 }

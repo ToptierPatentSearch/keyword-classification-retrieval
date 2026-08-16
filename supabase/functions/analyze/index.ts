@@ -267,7 +267,7 @@ const LONG_INPUT_WARNING_CHARS = 8000;
 const CLASSIFICATION_SEARCH_LIMIT = 30;
 const CANDIDATES_PER_SYSTEM = 3;
 const CANDIDATE_KEYWORD_LIMIT = 12;
-const CANDIDATE_SEARCH_CONCURRENCY = 3;
+const CANDIDATE_SEARCH_CONCURRENCY = 1;
 const FI_SELECTION_THRESHOLD = 0.58;
 const AREA_SELECTION_THRESHOLD = 0.52;
 const F_TERM_THEME_SELECTION_THRESHOLD = 0.48;
@@ -2971,8 +2971,14 @@ async function searchClassificationCandidates(
   genericKeyword: boolean,
 ): Promise<ClassificationCandidate[]> {
   const uniqueSearchTerms = Array.from(
-    new Set(searchTerms.map((term) => term.trim()).filter(Boolean)),
-  ).slice(0, 8);
+    new Set(
+      searchTerms
+        .map((term) => term.trim())
+        .filter(Boolean),
+    ),
+  )
+    .filter((term) => !/^[A-Za-z0-9]{1,2}$/.test(term))
+    .slice(0, 8);
   const candidatesByCode = new Map<string, ClassificationCandidate>();
 
   for (const [searchTermIndex, searchText] of uniqueSearchTerms.entries()) {

@@ -3,6 +3,7 @@ import autoTable from "jspdf-autotable";
 import type { AnalysisResult } from "./types";
 import {
   buildSearchQueryStarter,
+  getSearchQueryDatabases,
   SEARCH_QUERY_REVIEW_NOTICE,
 } from "./searchQuery";
 import {
@@ -205,8 +206,9 @@ export async function downloadAnalysisPdf(
   }
 
   const searchQueryStarter = buildSearchQueryStarter(result);
+  const searchQueryDatabases = getSearchQueryDatabases(searchQueryStarter);
 
-  if (currentY > pageHeight - 220) {
+  if (currentY > pageHeight - 170) {
     doc.addPage("a4", "portrait");
     currentY = 40;
   }
@@ -214,30 +216,19 @@ export async function downloadAnalysisPdf(
   autoTable(doc, {
     startY: currentY,
     margin: { left: 40, right: 40 },
-    head: [
-      [
-        "Generated Search Query Starter",
-        "Starting point for professional review",
-      ],
-    ],
+    head: [["Search Query Strategies", "Database-specific starting points"]],
     body: [
       [
         searchQueryStarter.reviewStatus === "corrected"
-          ? "AI query review — corrected"
+          ? "AI query review - corrected"
           : searchQueryStarter.reviewStatus === "accepted"
-            ? "AI query review — accepted"
+            ? "AI query review - accepted"
             : "Query review",
         searchQueryStarter.reviewSummary,
       ],
       [
-        "Boolean keyword query",
-        searchQueryStarter.keywordQuery ||
-          "No supported keyword query could be generated.",
-      ],
-      [
-        "Google Patents CPC query",
-        searchQueryStarter.classificationQuery ||
-          "No database-verified CPC codes were available.",
+        "Recommended strategy",
+        "Query 2 - Balanced. Query 1 is broader; Query 3 is more selective.",
       ],
     ],
     styles: {
@@ -262,9 +253,60 @@ export async function downloadAnalysisPdf(
   });
 
   currentY =
-    ((doc as AutoTableDocument).lastAutoTable?.finalY ?? currentY) + 12;
+    ((doc as AutoTableDocument).lastAutoTable?.finalY ?? currentY) + 16;
 
-  if (currentY > pageHeight - 70) {
+  for (const database of searchQueryDatabases) {
+    if (currentY > pageHeight - 210) {
+      doc.addPage("a4", "portrait");
+      currentY = 40;
+    }
+
+    const rows = database.strategies.map((strategy) => {
+      const filters = strategy.classificationFilters.length
+        ? `\nClassification filters:\n${strategy.classificationFilters.join("\n")}`
+        : "";
+      const queryText = strategy.query || "No supported query could be generated.";
+
+      return [
+        `${strategy.label}${strategy.recommended ? " (recommended)" : ""}`,
+        `${strategy.purpose}\n\n${queryText}${filters}`,
+      ];
+    });
+
+    autoTable(doc, {
+      startY: currentY,
+      margin: { left: 40, right: 40 },
+      head: [[database.label, database.syntaxLabel]],
+      body: [
+        ["Platform note", database.note],
+        ...rows,
+      ],
+      styles: {
+        font: PDF_FONT_FAMILY,
+        fontStyle: "normal",
+        fontSize: 8.5,
+        cellPadding: 5,
+        overflow: "linebreak",
+        valign: "top",
+      },
+      headStyles: {
+        fillColor: [49, 46, 129],
+        font: PDF_FONT_FAMILY,
+        fontStyle: "normal",
+        fontSize: 10,
+      },
+      columnStyles: {
+        0: { cellWidth: 150, fontStyle: "normal", textColor: [51, 65, 85] },
+        1: { cellWidth: contentWidth - 150 },
+      },
+      rowPageBreak: "avoid",
+    });
+
+    currentY =
+      ((doc as AutoTableDocument).lastAutoTable?.finalY ?? currentY) + 16;
+  }
+
+  if (currentY > pageHeight - 80) {
     doc.addPage("a4", "portrait");
     currentY = 40;
   }

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowRight, ChevronDown, Play } from "lucide-react";
 
 import "./FooterDemoMenu.css";
+import { setDemoNavigationSource } from "./demoNavigation";
 import inputLimitationText from "./input-limitation.txt?raw";
 import OperationGuide from "./OperationGuide";
 import privacyPolicyText from "./privacy-policy.txt?raw";
@@ -105,6 +106,7 @@ export default function Footer() {
   function openDemo(demoId: FooterDemoId) {
     setIsDemoMenuOpen(false);
     setActivePage(null);
+    setDemoNavigationSource("workspace");
     window.location.hash = `#/demo/${demoId}`;
   }
 

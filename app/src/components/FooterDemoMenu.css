@@ -1,0 +1,123 @@
+.footer-demo-menu {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.app-footer-links .footer-demo-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.footer-demo-trigger svg {
+  width: 0.95rem;
+  height: 0.95rem;
+  flex: 0 0 auto;
+}
+
+.footer-demo-trigger .footer-demo-chevron {
+  width: 0.8rem;
+  height: 0.8rem;
+  transition: transform 160ms ease;
+}
+
+.footer-demo-trigger[aria-expanded="true"] .footer-demo-chevron {
+  transform: rotate(180deg);
+}
+
+.footer-demo-popover {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 12px);
+  z-index: 50;
+  width: min(300px, calc(100vw - 32px));
+  padding: 8px;
+  transform: translateX(-50%);
+  border: 1px solid rgba(148, 163, 184, 0.4);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.18);
+  backdrop-filter: blur(12px);
+  text-align: left;
+}
+
+.footer-demo-popover[hidden] {
+  display: none;
+}
+
+.footer-demo-popover::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 100%;
+  width: 12px;
+  height: 12px;
+  transform: translate(-50%, -6px) rotate(45deg);
+  border-right: 1px solid rgba(148, 163, 184, 0.4);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.4);
+  background: #ffffff;
+}
+
+.footer-demo-popover-title {
+  margin: 2px 6px 6px;
+  color: #64748b;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.app-footer-links .footer-demo-item {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: #24324a;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.35;
+  text-align: left;
+}
+
+.app-footer-links .footer-demo-item:hover,
+.app-footer-links .footer-demo-item:focus-visible {
+  background: #edf2f8;
+  color: #0b1f3a;
+  text-decoration: none;
+}
+
+.footer-demo-item svg {
+  width: 0.95rem;
+  height: 0.95rem;
+  flex: 0 0 auto;
+  color: #64748b;
+}
+
+@media (max-width: 640px) {
+  .footer-demo-popover {
+    position: fixed;
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+    width: auto;
+    padding: 10px;
+    transform: none;
+    border-radius: 16px;
+  }
+
+  .footer-demo-popover::after {
+    display: none;
+  }
+
+  .app-footer-links .footer-demo-item {
+    min-height: 44px;
+  }
+}

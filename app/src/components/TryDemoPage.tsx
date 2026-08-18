@@ -8,7 +8,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import SearchQueryStarter from "./SearchQueryStarter";
-import type { DemoCase } from "./demoData"; 
+import type { DemoCase } from "./demoData";
 import "./TryDemoPage.css";
 
 
@@ -163,21 +163,25 @@ export default function TryDemoPage({
         </div>
       </section>
 
-      <section className="demo-footer-cta">
-        <div>
-          <p className="demo-result-label">Ready to analyze your own text?</p>
-          <h2>Continue to the secure analysis workspace.</h2>
-          <p>
-            Actual analysis supports English or Japanese input and may produce
-            different terms and classifications depending on the technical
-            disclosure.
-          </p>
-        </div>
-        <button className="demo-primary-button" type="button" onClick={onContinue}>
+      <nav className="demo-footer-nav" aria-label="Demo navigation">
+        <button
+          className="demo-footer-back"
+          type="button"
+          onClick={onBack}
+        >
+          <ArrowLeft aria-hidden="true" />
+          Back to overview
+        </button>
+
+        <button
+          className="demo-primary-button"
+          type="button"
+          onClick={onContinue}
+        >
           {continueLabel}
           <ArrowRight aria-hidden="true" />
         </button>
-      </section>
+      </nav>
     </main>
   );
 }

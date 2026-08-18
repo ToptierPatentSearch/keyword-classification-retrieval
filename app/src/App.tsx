@@ -671,7 +671,18 @@ type LandingPageProps = {
 
 function LandingPage({ onAcceptTerms, onOpenDemo }: LandingPageProps) {
   const [checked, setChecked] = useState(false);
+  useEffect(() => {
+    if (window.location.hash !== "#terms") {
+      return;
+    }
 
+    requestAnimationFrame(() => {
+      document.getElementById("terms")?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+  }, []);
   return (
     <main className="landing-page">
       <section className="landing-card">
@@ -685,7 +696,7 @@ function LandingPage({ onAcceptTerms, onOpenDemo }: LandingPageProps) {
           information.
         </p>
 
-        
+
 
         <div className="landing-section">
           <h2>Brief Features</h2>
@@ -701,7 +712,7 @@ function LandingPage({ onAcceptTerms, onOpenDemo }: LandingPageProps) {
         <div className="landing-section">
           <DemoShowcase onOpenDemo={onOpenDemo} />
         </div>
-        <div className="landing-section">
+        <div className="landing-section" id="terms">
           <h2>Terms of Use</h2>
           <div className="muted terms-text">
             {termsOfUseText
@@ -1425,15 +1436,17 @@ export default function App() {
       <TryDemoPage
         demo={selectedDemo}
         continueLabel={
-          session && termsAccepted
-            ? "Open analysis workspace"
-            : "Create your own analysis"
+          termsAccepted
+            ? session
+              ? "Open analysis workspace"
+              : "Continue to Sign In"
+            : "Review Terms & Start Analysis"
         }
         onBack={() => {
           window.location.hash = "";
         }}
         onContinue={() => {
-          window.location.hash = "";
+          window.location.hash = termsAccepted ? "" : "#terms";
         }}
       />
     );

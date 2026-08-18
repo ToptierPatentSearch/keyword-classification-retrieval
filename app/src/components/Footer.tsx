@@ -1,5 +1,7 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { ArrowRight, ChevronDown, Play } from "lucide-react";
 
+import "./FooterDemoMenu.css";
 import inputLimitationText from "./input-limitation.txt?raw";
 import OperationGuide from "./OperationGuide";
 import privacyPolicyText from "./privacy-policy.txt?raw";
@@ -12,6 +14,11 @@ type FooterPageKey =
   | "privacy-policy";
 
 type TextFooterPageKey = Exclude<FooterPageKey, "operation-guide">;
+
+type FooterDemoId =
+  | "ai-image-recognition"
+  | "adaptive-beamforming"
+  | "cardiac-monitoring";
 
 const footerPages: Record<
   TextFooterPageKey,
@@ -34,12 +41,72 @@ const footerPages: Record<
   },
 };
 
+const footerDemos: ReadonlyArray<{
+  id: FooterDemoId;
+  title: string;
+}> = [
+  {
+    id: "ai-image-recognition",
+    title: "AI Image Recognition",
+  },
+  {
+    id: "adaptive-beamforming",
+    title: "5G/6G Adaptive Beamforming",
+  },
+  {
+    id: "cardiac-monitoring",
+    title: "Wearable Cardiac Monitoring",
+  },
+];
+
 export default function Footer() {
   const [activePage, setActivePage] = useState<FooterPageKey | null>(null);
+  const [isDemoMenuOpen, setIsDemoMenuOpen] = useState(false);
+  const demoMenuRef = useRef<HTMLSpanElement>(null);
   const activeTextPage =
     activePage && activePage !== "operation-guide"
       ? footerPages[activePage]
       : null;
+
+  useEffect(() => {
+    if (!isDemoMenuOpen) {
+      return;
+    }
+
+    function closeDemoMenuOnOutsideClick(event: MouseEvent) {
+      if (
+        demoMenuRef.current &&
+        !demoMenuRef.current.contains(event.target as Node)
+      ) {
+        setIsDemoMenuOpen(false);
+      }
+    }
+
+    function closeDemoMenuOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsDemoMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", closeDemoMenuOnOutsideClick);
+    document.addEventListener("keydown", closeDemoMenuOnEscape);
+
+    return () => {
+      document.removeEventListener("mousedown", closeDemoMenuOnOutsideClick);
+      document.removeEventListener("keydown", closeDemoMenuOnEscape);
+    };
+  }, [isDemoMenuOpen]);
+
+  function openFooterPage(page: FooterPageKey) {
+    setIsDemoMenuOpen(false);
+    setActivePage(page);
+  }
+
+  function openDemo(demoId: FooterDemoId) {
+    setIsDemoMenuOpen(false);
+    setActivePage(null);
+    window.location.hash = `#/demo/${demoId}`;
+  }
 
   return (
     <>
@@ -84,7 +151,7 @@ export default function Footer() {
         <div className="app-footer-links">
           <button
             type="button"
-            onClick={() => setActivePage("input-limitation")}
+            onClick={() => openFooterPage("input-limitation")}
             aria-expanded={activePage === "input-limitation"}
           >
             Input Limitations
@@ -94,7 +161,7 @@ export default function Footer() {
 
           <button
             type="button"
-            onClick={() => setActivePage("operation-guide")}
+            onClick={() => openFooterPage("operation-guide")}
             aria-expanded={activePage === "operation-guide"}
           >
             Operation Guide
@@ -102,9 +169,54 @@ export default function Footer() {
 
           <span>|</span>
 
+          <span className="footer-demo-menu" ref={demoMenuRef}>
+            <button
+              type="button"
+              className="footer-demo-trigger"
+              aria-haspopup="menu"
+              aria-expanded={isDemoMenuOpen}
+              aria-controls="footer-demo-menu"
+              onClick={() => {
+                setActivePage(null);
+                setIsDemoMenuOpen((isOpen) => !isOpen);
+              }}
+            >
+              <Play aria-hidden="true" />
+              Demos
+              <ChevronDown
+                className="footer-demo-chevron"
+                aria-hidden="true"
+              />
+            </button>
+
+            <div
+              id="footer-demo-menu"
+              className="footer-demo-popover"
+              role="menu"
+              aria-label="Guided product demos"
+              hidden={!isDemoMenuOpen}
+            >
+              <p className="footer-demo-popover-title">Guided product demos</p>
+              {footerDemos.map((demo) => (
+                <button
+                  key={demo.id}
+                  type="button"
+                  className="footer-demo-item"
+                  role="menuitem"
+                  onClick={() => openDemo(demo.id)}
+                >
+                  <span>{demo.title}</span>
+                  <ArrowRight aria-hidden="true" />
+                </button>
+              ))}
+            </div>
+          </span>
+
+          <span>|</span>
+
           <button
             type="button"
-            onClick={() => setActivePage("terms-of-use")}
+            onClick={() => openFooterPage("terms-of-use")}
             aria-expanded={activePage === "terms-of-use"}
           >
             Terms of Use
@@ -114,7 +226,7 @@ export default function Footer() {
 
           <button
             type="button"
-            onClick={() => setActivePage("privacy-policy")}
+            onClick={() => openFooterPage("privacy-policy")}
             aria-expanded={activePage === "privacy-policy"}
           >
             Privacy Policy

@@ -6,6 +6,8 @@ import {
 } from "lucide-react";
 
 import "./DemoShowcase.css";
+import { setDemoNavigationSource } from "./demoNavigation";
+
 export type FeaturedDemoId =
   | "ai-image-recognition"
   | "adaptive-beamforming"
@@ -45,6 +47,11 @@ const FEATURED_DEMOS = [
 export default function DemoShowcase({
   onOpenDemo,
 }: DemoShowcaseProps) {
+  function openLandingDemo(demoId: FeaturedDemoId) {
+    setDemoNavigationSource("landing");
+    onOpenDemo(demoId);
+  }
+
   return (
     <div className="demo-showcase">
       <div className="demo-showcase-heading">
@@ -71,7 +78,7 @@ export default function DemoShowcase({
             <button
               type="button"
               className="demo-showcase-button"
-              onClick={() => onOpenDemo(id)}
+              onClick={() => openLandingDemo(id)}
             >
               View demo
               <ArrowRight aria-hidden="true" />

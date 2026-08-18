@@ -1,16 +1,28 @@
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
   CheckCircle2,
+  ChevronDown,
   FileSearch,
+  LayoutGrid,
   LockKeyhole,
   Search,
   Sparkles,
 } from "lucide-react";
 import SearchQueryStarter from "./SearchQueryStarter";
-import type { DemoCase } from "./demoData";
+import {
+  ADAPTIVE_BEAMFORMING_DEMO,
+  AI_IMAGE_RECOGNITION_DEMO,
+  CARDIAC_MONITORING_DEMO,
+  type DemoCase,
+} from "./demoData";
+import {
+  clearDemoNavigationSource,
+  getDemoNavigationSource,
+} from "./demoNavigation";
 import "./TryDemoPage.css";
-
+import "./TryDemoNavigation.css";
 
 type TryDemoPageProps = {
   demo: DemoCase;
@@ -19,12 +31,102 @@ type TryDemoPageProps = {
   continueLabel: string;
 };
 
+const WORKSPACE_DEMOS: ReadonlyArray<{
+  demo: DemoCase;
+  displayTitle: string;
+}> = [
+  {
+    demo: AI_IMAGE_RECOGNITION_DEMO,
+    displayTitle: "AI Image Recognition",
+  },
+  {
+    demo: ADAPTIVE_BEAMFORMING_DEMO,
+    displayTitle: "5G/6G Adaptive Beamforming",
+  },
+  {
+    demo: CARDIAC_MONITORING_DEMO,
+    displayTitle: "Wearable Cardiac Monitoring",
+  },
+];
+
 export default function TryDemoPage({
   demo,
   onBack,
   onContinue,
   continueLabel,
 }: TryDemoPageProps) {
+  const [demoSource] = useState(getDemoNavigationSource);
+  const [activeDemo, setActiveDemo] = useState(demo);
+  const [isDemoSelectorOpen, setIsDemoSelectorOpen] = useState(false);
+  const demoSelectorRef = useRef<HTMLDivElement>(null);
+  const isWorkspaceDemo = demoSource === "workspace";
+
+  useEffect(() => {
+    setActiveDemo(demo);
+  }, [demo]);
+
+  useEffect(() => {
+    if (!isDemoSelectorOpen) {
+      return;
+    }
+
+    function closeSelectorOnOutsideClick(event: MouseEvent) {
+      if (
+        demoSelectorRef.current &&
+        !demoSelectorRef.current.contains(event.target as Node)
+      ) {
+        setIsDemoSelectorOpen(false);
+      }
+    }
+
+    function closeSelectorOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsDemoSelectorOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", closeSelectorOnOutsideClick);
+    document.addEventListener("keydown", closeSelectorOnEscape);
+
+    return () => {
+      document.removeEventListener("mousedown", closeSelectorOnOutsideClick);
+      document.removeEventListener("keydown", closeSelectorOnEscape);
+    };
+  }, [isDemoSelectorOpen]);
+
+  function handleBackToExamples() {
+    clearDemoNavigationSource();
+    onBack();
+
+    window.setTimeout(() => {
+      document
+        .querySelector<HTMLElement>(".demo-showcase")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+  }
+
+  function handleContinueFromLanding() {
+    clearDemoNavigationSource();
+    onContinue();
+  }
+
+  function handleReturnToWorkspace() {
+    clearDemoNavigationSource();
+    onContinue();
+  }
+
+  function handleSelectWorkspaceDemo(nextDemo: DemoCase) {
+    setIsDemoSelectorOpen(false);
+
+    if (nextDemo.id === activeDemo.id) {
+      return;
+    }
+
+    setActiveDemo(nextDemo);
+    const nextUrl = `${window.location.pathname}${window.location.search}#/demo/${nextDemo.id}`;
+    window.history.replaceState(window.history.state, document.title, nextUrl);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
 
   return (
     <main className="demo-page">
@@ -38,9 +140,17 @@ export default function TryDemoPage({
             <small>Keyword &amp; Classification Mapping</small>
           </span>
         </div>
-        <button className="demo-back-button" type="button" onClick={onBack}>
+        <button
+          className="demo-back-button"
+          type="button"
+          onClick={
+            isWorkspaceDemo ? handleReturnToWorkspace : handleBackToExamples
+          }
+        >
           <ArrowLeft aria-hidden="true" />
-          Back to overview
+          {isWorkspaceDemo
+            ? "Return to workspace"
+            : "Back to example analyses"}
         </button>
       </header>
 
@@ -55,13 +165,15 @@ export default function TryDemoPage({
           </h1>
           <p>
             This read-only example previews the app&apos;s patent-search workflow
-            using the preselected {demo.title} concept.
+            using the preselected {activeDemo.title} concept.
           </p>
         </div>
         <aside className="demo-access-note">
           <LockKeyhole aria-hidden="true" />
           <span>
-            <strong>No sign-in required</strong>
+            <strong>
+              {isWorkspaceDemo ? "Read-only demo" : "No sign-in required"}
+            </strong>
             <small>No analysis credit is used</small>
           </span>
         </aside>
@@ -98,13 +210,13 @@ export default function TryDemoPage({
             </span>
             <span>
               <small>Preselected technical example</small>
-              <h2>{demo.title}</h2>
+              <h2>{activeDemo.title}</h2>
             </span>
           </div>
           <label htmlFor="demo-technical-text">Technical text</label>
           <textarea
             id="demo-technical-text"
-            value={demo.technicalExample}
+            value={activeDemo.technicalExample}
             readOnly
             aria-readonly="true"
           />
@@ -117,10 +229,10 @@ export default function TryDemoPage({
         <div className="demo-results">
           <article className="demo-panel demo-concept-panel">
             <p className="demo-result-label">Common technical concept</p>
-            <h2>{demo.conceptTitle}</h2>
-            <p>{demo.conceptDescription}</p>
+            <h2>{activeDemo.conceptTitle}</h2>
+            <p>{activeDemo.conceptDescription}</p>
             <div className="demo-facet-row">
-              {demo.facets.map((facet) => (
+              {activeDemo.facets.map((facet) => (
                 <span key={facet}>{facet}</span>
               ))}
             </div>
@@ -129,7 +241,7 @@ export default function TryDemoPage({
           <article className="demo-panel">
             <p className="demo-result-label">Keywords &amp; synonyms</p>
             <div className="demo-keyword-list">
-              {demo.keywords.map((keyword) => (
+              {activeDemo.keywords.map((keyword) => (
                 <div key={keyword.term} className="demo-keyword">
                   <CheckCircle2 aria-hidden="true" />
                   <span>
@@ -146,7 +258,7 @@ export default function TryDemoPage({
               Representative classification mapping
             </p>
             <div className="demo-classification-list">
-              {demo.classifications.map((item) => (
+              {activeDemo.classifications.map((item) => (
                 <div key={item.code} className="demo-classification">
                   <span>{item.system}</span>
                   <strong>{item.code}</strong>
@@ -157,28 +269,85 @@ export default function TryDemoPage({
           </article>
 
           <SearchQueryStarter
-            starter={demo.queryStarter}
+            starter={activeDemo.queryStarter}
             className="demo-panel"
           />
         </div>
       </section>
 
       <nav className="demo-footer-nav" aria-label="Demo navigation">
-        <button
-          className="demo-footer-back"
-          type="button"
-          onClick={onBack}
-        >
-          <ArrowLeft aria-hidden="true" />
-          Back to overview
-        </button>
+        {isWorkspaceDemo ? (
+          <div className="demo-selector-control" ref={demoSelectorRef}>
+            <button
+              className="demo-choose-button"
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded={isDemoSelectorOpen}
+              aria-controls="demo-selector-menu"
+              onClick={() => setIsDemoSelectorOpen((isOpen) => !isOpen)}
+            >
+              <LayoutGrid aria-hidden="true" />
+              Choose another demo
+              <ChevronDown className="demo-choose-chevron" aria-hidden="true" />
+            </button>
+
+            <div
+              id="demo-selector-menu"
+              className="demo-selector-popover"
+              role="menu"
+              aria-label="Choose another guided product demo"
+              hidden={!isDemoSelectorOpen}
+            >
+              <p className="demo-selector-heading">Guided product demos</p>
+              {WORKSPACE_DEMOS.map(({ demo: demoOption, displayTitle }) => {
+                const isCurrent = demoOption.id === activeDemo.id;
+
+                return (
+                  <button
+                    key={demoOption.id}
+                    type="button"
+                    className={`demo-selector-item${
+                      isCurrent ? " is-current" : ""
+                    }`}
+                    role="menuitemradio"
+                    aria-checked={isCurrent}
+                    onClick={() => handleSelectWorkspaceDemo(demoOption)}
+                  >
+                    <span className="demo-selector-item-copy">
+                      <strong>{displayTitle}</strong>
+                      <small>{demoOption.field}</small>
+                    </span>
+                    {isCurrent ? (
+                      <CheckCircle2 aria-hidden="true" />
+                    ) : (
+                      <ArrowRight aria-hidden="true" />
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <button
+            className="demo-footer-back"
+            type="button"
+            onClick={handleBackToExamples}
+          >
+            <ArrowLeft aria-hidden="true" />
+            Back to example analyses
+          </button>
+        )}
 
         <button
           className="demo-primary-button"
           type="button"
-          onClick={onContinue}
+          onClick={
+            isWorkspaceDemo
+              ? handleReturnToWorkspace
+              : handleContinueFromLanding
+          }
         >
-          {continueLabel}
+          {isWorkspaceDemo ? "Return to analysis workspace" : continueLabel}
           <ArrowRight aria-hidden="true" />
         </button>
       </nav>

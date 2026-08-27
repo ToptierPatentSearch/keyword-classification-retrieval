@@ -7,6 +7,7 @@ import {
   type SearchDatabaseId,
   type SearchStrategyId,
 } from "../searchQuery";
+import { databaseSafeQuery } from "../queryOutputSafety";
 import "./SearchQueryStarter.css";
 
 type CopiedQueryKey = `${SearchDatabaseId}:${SearchStrategyId | "all"}`;
@@ -15,19 +16,6 @@ type SearchQueryStarterProps = {
   starter: GeneratedSearchQueryStarter;
   className?: string;
 };
-
-function databaseSafeQuery(databaseId: SearchDatabaseId, value: string): string {
-  if (databaseId !== "j_platpat") {
-    return value;
-  }
-
-  // In J-PlatPat Logical Expression Input, the half-width hyphen/minus is the
-  // NOT operator. A literal hyphen inside a keyword therefore has to be
-  // entered as a full-width character. J-PlatPat expands hyphen/minus
-  // notation variants during retrieval, so this preserves the intended term
-  // while preventing a syntax error such as 'local private-data server'/TX.
-  return value.replace(/-/g, "－");
-}
 
 export default function SearchQueryStarter({
   starter,

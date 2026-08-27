@@ -249,6 +249,7 @@ function makeStrategy(
     copyText: `${query}${filterText}`.trim(),
   };
 }
+
 function joinPrecisionKeywordGroups(groups: string[]): string {
   const selectedGroups = groups.slice(0, PRECISION_GROUPS);
 
@@ -270,6 +271,7 @@ function joinPrecisionKeywordGroups(groups: string[]): string {
     .filter(Boolean)
     .join(" AND ");
 }
+
 function getBroadGroupCount(groups: string[]): number {
   if (groups.length <= 1) return 1;
   return Math.min(BROAD_GROUPS, groups.length - 1);
@@ -409,8 +411,80 @@ function buildUsptoDatabase(
   };
 }
 
-function formatJPlatPatFilter(label: string, codes: string[]): string {
-  return codes.length ? `${label}: ${codes.join(" OR ")}` : "";
+function unquoteBooleanTerm(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.startsWith('"') && trimmed.endsWith('"') && trimmed.length >= 2) {
+    return trimmed.slice(1, -1).trim();
+  }
+  return trimmed;
+}
+
+function formatJPlatPatTextTerm(value: string): string {
+  const cleaned = unquoteBooleanTerm(value)
+    .normalize("NFKC")
+    .replace(/[‘’']/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  if (!cleaned) {
+    return "";
+  }
+
+  return /\s/.test(cleaned) ? `'${cleaned}'` : cleaned;
+}
+
+function convertKeywordGroupToJPlatPat(group: string): string {
+  const trimmed = group.trim();
+  const inner =
+    trimmed.startsWith("(") && trimmed.endsWith(")")
+      ? trimmed.slice(1, -1)
+      : trimmed;
+  const terms = inner
+    .split(/\s+OR\s+/i)
+    .map(formatJPlatPatTextTerm)
+    .filter(Boolean);
+
+  return terms.length > 0 ? `[(${terms.join("+")})/TX]` : "";
+}
+
+function buildJPlatPatTextExpression(query: string): string {
+  return splitTopLevelAndGroups(query)
+    .map(convertKeywordGroupToJPlatPat)
+    .filter(Boolean)
+    .join("*");
+}
+
+function normalizeJPlatPatClassificationCode(value: string): string {
+  return cleanClassificationCode(value).replace(/\s+/g, "");
+}
+
+function buildJPlatPatClassificationCondition(
+  tag: "FI" | "IP" | "FT",
+  values: string[],
+): string {
+  const codes = Array.from(
+    new Set(
+      values
+        .map(normalizeJPlatPatClassificationCode)
+        .filter(Boolean),
+    ),
+  ).sort((a, b) => a.localeCompare(b));
+
+  return codes.length > 0 ? `[(${codes.join("+")})/${tag}]` : "";
+}
+
+function combineJPlatPatWithAnd(...parts: string[]): string {
+  return parts.filter(Boolean).join("*");
+}
+
+function buildJPlatPatPrimaryClassification(
+  codes: VerifiedClassificationCodes,
+): string {
+  if (codes.FI.length > 0) {
+    return buildJPlatPatClassificationCondition("FI", codes.FI);
+  }
+
+  return buildJPlatPatClassificationCondition("IP", codes.IPC);
 }
 
 function buildJPlatPatDatabase(
@@ -418,42 +492,50 @@ function buildJPlatPatDatabase(
   codes: VerifiedClassificationCodes,
   balancedKeywordQuery: string,
 ): GeneratedSearchDatabase {
-  const balancedFilters = [
-    formatJPlatPatFilter("FI", codes.FI.length ? codes.FI : codes.IPC),
-  ].filter(Boolean);
-  const precisionFilters = [
-    ...balancedFilters,
-    formatJPlatPatFilter("F-term", codes["F-term"]),
-  ].filter(Boolean);
+  const broadBoolean = joinKeywordGroups(groups, getBroadGroupCount(groups));
+  const balancedBoolean = groups.length > 0
+    ? joinKeywordGroups(groups, BALANCED_GROUPS)
+    : balancedKeywordQuery;
+  const precisionBoolean = joinPrecisionKeywordGroups(groups);
+
+  const broad = buildJPlatPatTextExpression(broadBoolean);
+  const balancedText = buildJPlatPatTextExpression(balancedBoolean);
+  const precisionText = buildJPlatPatTextExpression(precisionBoolean);
+  const primaryClassification = buildJPlatPatPrimaryClassification(codes);
+  const fTermClassification = buildJPlatPatClassificationCondition(
+    "FT",
+    codes["F-term"],
+  );
 
   return {
     id: "j_platpat",
     label: "J-PlatPat",
-    syntaxLabel: "Patent/Utility Model Search - Selection Input",
-    note: "Use the keyword expression as the Full text search recipe, then apply the listed FI/F-term filters in the corresponding J-PlatPat classification fields. This avoids treating J-PlatPat as a Google-Patents-style one-line query.",
+    syntaxLabel: "Patent/Utility Model Search - Logical Expression Input",
+    note: "Paste each expression into J-PlatPat's Logical Expression Input. The generator uses * for AND, + for OR, /TX for Full text, verified /FI when available (otherwise /IP for IPC), and /FT for verified F-term refinement.",
     strategies: [
       makeStrategy(
         "query1",
         "Query 1 - Broad discovery",
-        "High-recall Full text recipe without a classification restriction.",
-        joinKeywordGroups(groups, getBroadGroupCount(groups)),
+        "High-recall J-PlatPat full-text logical expression without a classification restriction.",
+        broad,
       ),
       makeStrategy(
         "query2",
         "Query 2 - Balanced",
-        "Recommended starting point: principal Full text concepts plus verified FI (or IPC fallback) filters.",
-        groups.length > 0
-          ? joinKeywordGroups(groups, BALANCED_GROUPS)
-          : balancedKeywordQuery,
-        balancedFilters,
+        "Recommended starting point: principal full-text concepts combined with verified FI scope, or IPC when verified FI is unavailable.",
+        combineJPlatPatWithAnd(balancedText, primaryClassification),
+        [],
         true,
       ),
       makeStrategy(
         "query3",
         "Query 3 - Precision",
-        "Uses additional Full text concept groups when available; otherwise narrows synonym alternatives, with F-term refinement when available.",
-        joinPrecisionKeywordGroups(groups),
-        precisionFilters,
+        "Uses additional full-text concept groups when available and adds verified F-term refinement when available.",
+        combineJPlatPatWithAnd(
+          precisionText,
+          primaryClassification,
+          fTermClassification,
+        ),
       ),
     ],
   };

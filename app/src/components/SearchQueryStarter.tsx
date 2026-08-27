@@ -16,6 +16,19 @@ type SearchQueryStarterProps = {
   className?: string;
 };
 
+function databaseSafeQuery(databaseId: SearchDatabaseId, value: string): string {
+  if (databaseId !== "j_platpat") {
+    return value;
+  }
+
+  // In J-PlatPat Logical Expression Input, the half-width hyphen/minus is the
+  // NOT operator. A literal hyphen inside a keyword therefore has to be
+  // entered as a full-width character. J-PlatPat expands hyphen/minus
+  // notation variants during retrieval, so this preserves the intended term
+  // while preventing a syntax error such as 'local private-data server'/TX.
+  return value.replace(/-/g, "－");
+}
+
 export default function SearchQueryStarter({
   starter,
   className = "",
@@ -70,7 +83,10 @@ export default function SearchQueryStarter({
       return;
     }
 
-    void copyText(`${activeDatabase.id}:${strategyId}`, copyValue);
+    void copyText(
+      `${activeDatabase.id}:${strategyId}`,
+      databaseSafeQuery(activeDatabase.id, copyValue),
+    );
   }
 
   function handleCopyAll() {
@@ -81,7 +97,10 @@ export default function SearchQueryStarter({
     const allQueries = activeDatabase.strategies
       .map(
         (strategy) =>
-          `${strategy.label}${strategy.recommended ? " (recommended)" : ""}\n${strategy.copyText}`,
+          `${strategy.label}${strategy.recommended ? " (recommended)" : ""}\n${databaseSafeQuery(
+            activeDatabase.id,
+            strategy.copyText,
+          )}`,
       )
       .join("\n\n");
 
@@ -170,6 +189,10 @@ export default function SearchQueryStarter({
             {activeDatabase.strategies.map((strategy) => {
               const copiedKey: CopiedQueryKey = `${activeDatabase.id}:${strategy.id}`;
               const copied = copiedQuery === copiedKey;
+              const displayedQuery = databaseSafeQuery(
+                activeDatabase.id,
+                strategy.query,
+              );
 
               return (
                 <article
@@ -207,8 +230,8 @@ export default function SearchQueryStarter({
                     </button>
                   </div>
 
-                  {strategy.query ? (
-                    <code className="query-strategy-code">{strategy.query}</code>
+                  {displayedQuery ? (
+                    <code className="query-strategy-code">{displayedQuery}</code>
                   ) : (
                     <p className="query-starter-empty">
                       No supported query could be generated from this analysis.

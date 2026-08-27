@@ -97,6 +97,7 @@ Deno.test("J-PlatPat broad query uses +, *, /TX, and safe literal hyphens", () =
         "private data servers",
         "local private-data server",
       ]),
+      makeKeyword(3, "access control", ["authorization", "access restriction"]),
     ]),
   );
 

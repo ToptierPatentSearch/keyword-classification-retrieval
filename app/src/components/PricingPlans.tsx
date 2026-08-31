@@ -35,6 +35,7 @@ export function PricingPlans({
 
   const [loadingPlan, setLoadingPlan] = useState<PlanId | null>(null);
   const [remainingCredits, setRemainingCredits] = useState<number | null>(null);
+  const [creditsExpired, setCreditsExpired] = useState(false);
   const [balanceLoading, setBalanceLoading] = useState(false);
 
   function applyCredits(credits: number) {
@@ -45,6 +46,7 @@ export function PricingPlans({
 
   async function fetchRemainingCredits() {
     if (!session) {
+      setCreditsExpired(false);
       applyCredits(0);
       return;
     }
@@ -54,7 +56,7 @@ export function PricingPlans({
     try {
       const { data, error } = await supabase
         .from('user_credit_balances')
-        .select('remaining_credits')
+        .select('remaining_credits, expires_at')
         .eq('user_id', session.user.id)
         .maybeSingle();
 
@@ -62,13 +64,22 @@ export function PricingPlans({
         throw error;
       }
 
-      const credits = Number(data?.remaining_credits ?? 0);
+      const storedCredits = Number(data?.remaining_credits ?? 0);
+      const expiresAt = typeof data?.expires_at === 'string' ? data.expires_at : null;
+      const isExpired = expiresAt
+        ? new Date(expiresAt).getTime() <= Date.now()
+        : false;
+      const usableCredits = isExpired ? 0 : storedCredits;
+
+      setCreditsExpired(isExpired && storedCredits > 0);
 
       console.log('Credit balance row:', data);
-      console.log('remainingCredits =', credits);
+      console.log('storedRemainingCredits =', storedCredits);
+      console.log('usableRemainingCredits =', usableCredits);
 
-      applyCredits(credits);
+      applyCredits(usableCredits);
     } catch (error) {
+      setCreditsExpired(false);
       onError(`${t.checkoutError} ${asErrorMessage(error)}`);
       applyCredits(0);
     } finally {
@@ -168,6 +179,11 @@ export function PricingPlans({
       <div className="pricing-heading">
         <h2 id="pricing-heading">{t.heading}</h2>
         <p>{t.description}</p>
+        <p className="warning" role="status">
+          {creditsExpired
+            ? 'Your previous analysis credits have expired. Purchase a new Test pack or Business pack to continue.'
+            : 'No active analysis credits are available. Purchase a Test pack or Business pack to continue.'}
+        </p>
       </div>
 
       <div className="pricing-grid">

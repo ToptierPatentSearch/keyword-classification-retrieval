@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
 import AdminMaintenanceEntryPoint from './components/AdminMaintenanceEntryPoint';
+import PasswordRecoveryEntryPoint from './components/PasswordRecoveryEntryPoint';
 import RuntimeMaintenanceGate from './components/RuntimeMaintenanceGate';
 import { startAnalysisInsightController } from './analysisInsightController';
 import './styles.css';
@@ -11,7 +12,9 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <RuntimeMaintenanceGate>
       <AdminMaintenanceEntryPoint>
-        <App />
+        <PasswordRecoveryEntryPoint>
+          <App />
+        </PasswordRecoveryEntryPoint>
       </AdminMaintenanceEntryPoint>
     </RuntimeMaintenanceGate>
   </StrictMode>,

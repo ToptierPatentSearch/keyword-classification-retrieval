@@ -96,6 +96,26 @@ The request includes the user's Supabase access token and the publishable key in
 
 ## 5. Deploy the frontend to GitHub Pages
 
+The intended production custom domain is `search.toptierpatentsearch.com`. Builds default
+to `VITE_BASE_PATH=/`, and the committed `.env.local` uses the same root path.
+The `main` deployment workflow publishes `app/dist` through GitHub Actions.
+
+Complete the hosting configuration outside the build:
+
+1. In the repository's **Settings > Pages**, use **GitHub Actions** as the source
+   and save `search.toptierpatentsearch.com` under **Custom domain**.
+2. At the DNS provider, set the `search` CNAME record to
+   `toptierpatentsearch.github.io` (without a repository path).
+3. Enable **Enforce HTTPS** after GitHub has issued the certificate.
+4. In the app's Supabase project, set the Auth Site URL to
+   `https://search.toptierpatentsearch.com/` and add that exact URL to the allowed
+   redirect URLs. Retain any local development URLs still in use.
+5. Verify sign-up email confirmation and password recovery return to the new
+   domain. Both frontend flows derive their redirect from Vite's `BASE_URL`.
+
+A repository `CNAME` file is not required for this GitHub Actions deployment;
+the custom domain must be saved in the Pages settings.
+
 For a user/organization GitHub Pages site, leave:
 
 ```bash

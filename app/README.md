@@ -110,8 +110,13 @@ Complete the hosting configuration outside the build:
 4. In the app's Supabase project, set the Auth Site URL to
    `https://search.toptierpatentsearch.com/` and add that exact URL to the allowed
    redirect URLs. Retain any local development URLs still in use.
-5. Verify sign-up email confirmation and password recovery return to the new
-   domain. Both frontend flows derive their redirect from Vite's `BASE_URL`.
+5. Update the Supabase Edge Function secret `SITE_URL` to
+   `https://search.toptierpatentsearch.com/`. The `create-checkout-session`
+   function uses this value for Stripe Checkout success and cancellation URLs.
+   This secret is separate from the Auth Site URL setting above.
+6. Verify sign-up email confirmation, password recovery, and both Stripe
+   Checkout return flows use the new domain. Both frontend authentication flows
+   derive their redirect from Vite's `BASE_URL`.
 
 A repository `CNAME` file is not required for this GitHub Actions deployment;
 the custom domain must be saved in the Pages settings.

@@ -1154,7 +1154,7 @@ export default function App() {
             email,
             password,
             options: {
-              emailRedirectTo: `${window.location.origin}/keyword-classification-retrieval/`,
+              emailRedirectTo: new URL(import.meta.env.BASE_URL, window.location.origin).toString(),
             },
           });
       if (authError) {
